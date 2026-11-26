@@ -10,6 +10,7 @@ import { db } from '../server/lib/db.ts'
 import { chunkMarkdown } from '../server/ported/rag/chunker.ts'
 import { embedTexts } from '../server/ported/rag/embeddings.ts'
 import { toCents } from '../server/ported/invoices/money.ts'
+import { debrand } from './debrand.ts'
 
 if (existsSync('.env')) process.loadEnvFile('.env')
 const args = process.argv.slice(2)
@@ -91,9 +92,10 @@ async function main() {
     const files = readdirSync(kbDir).filter(f => f.endsWith('.md')).sort()
     const pending: { id: number; heading: string | null; content: string; title: string }[] = []
     for (const f of files) {
-      const { meta, body } = frontMatter(readFileSync(join(kbDir, f), 'utf8'))
+      const { meta, body: raw } = frontMatter(readFileSync(join(kbDir, f), 'utf8'))
+      const body = debrand(raw)
       const slug = meta.slug || f.replace(/\.md$/, '')
-      const title = meta.title || slug
+      const title = debrand(meta.title || slug, { title: true })
       const doc = await client.query<{ id: number }>(
         `insert into kb_documents (slug, title, source, valid_from, valid_to) values ($1,$2,$3,$4,$5) returning id`,
         [slug, title, meta.source || join(kbDir, f), nullable(meta.valid_from), nullable(meta.valid_to)],
