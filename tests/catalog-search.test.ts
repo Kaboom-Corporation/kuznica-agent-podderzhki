@@ -1,19 +1,50 @@
 import { describe, expect, it } from 'vitest'
-import { buildTsQueries, queryWords } from '../server/agent/catalog-search'
+import { analogQuery, buildTsQueries, queryWords, seatCount, termMonths } from '../server/agent/catalog-search'
 import { decode, parseOffer } from '../scripts/ingest-feed'
 
 describe('catalog-search', () => {
   it('выкидывает числа и пунктуацию, бренды пишет обоими способами', () => {
-    expect(queryWords('Касперский на 5 компов!')).toEqual(['касперский', 'на', 'компов'])
-    const q = buildTsQueries('касперский на 5 компов')!
-    expect(q.all).toBe('(касперский:* | kaspersky:*) & на:* & (компов:* | пк:* | компьютер:*)')
+    expect(queryWords('Касперский на 5 компов!')).toEqual(['касперский', 'компов'])
+    const q = buildTsQueries('сколько стоит касперский на 5 компов')!
+    expect(q.all).toBe('(касперский:* | kaspersky:*) & (компов:* | пк:* | компьютер:*)')
     expect(q.any).toContain(' | ')
+  })
+  it('редакции по-русски ищутся и латиницей', () => {
+    expect(buildTsQueries('касперский стандарт')!.all).toBe('(касперский:* | kaspersky:*) & (стандарт:* | standard:*)')
+  })
+  it('число мест из запроса', () => {
+    expect(seatCount('касперский на 3 устройства на год')).toBe(3)
+    expect(seatCount('защита на 50 сотрудников')).toBe(50)
+    expect(seatCount('windows 11 pro')).toBeNull()
+  })
+  it('срок из запроса', () => {
+    expect(termMonths('касперский на год')).toBe(12)
+    expect(termMonths('dr.web на 3 года')).toBe(36)
+    expect(termMonths('подписка 24 мес')).toBe(24)
+    expect(termMonths('windows 11 pro')).toBeNull()
+  })
+  it('dr.web и кириллическая «х86» из фида', () => {
+    expect(buildTsQueries('dr.web x86')!.all).toBe('(dr:* | доктор:* | drweb:*) & (web:* | веб:*) & (x86:* | х86:*)')
   })
   it('пустой запрос — без tsquery', () => {
     expect(buildTsQueries('5 ?')).toBeNull()
   })
   it('спецсимволы tsquery не пролезают', () => {
     expect(buildTsQueries("ab' & cd:* | !ef")!.all).toBe('ab:* & cd:* & ef:*')
+  })
+  it('российский аналог: класс из вопроса', () => {
+    expect(analogQuery('чем заменить виндовс, чтобы было в реестре?')).toBe('astra linux special edition рабочей станции')
+    expect(analogQuery('нужна российская ос на 10 машин')).toBe('astra linux special edition рабочей станции')
+    expect(analogQuery('есть отечественный аналог vmware?')).toBe('ред виртуализация')
+  })
+  it('российский аналог: класс из первой реплики, а не из уточнений', () => {
+    const earlier = ['не знаю что нам нужно, хочу защитить почту и файлы для 50 сотрудников', 'у нас Windows, почта на своём Exchange']
+    expect(analogQuery('а есть российский аналог?', earlier)).toBe('доктор веб комплексная защита на 1 год на 50 пк')
+  })
+  it('российский аналог: не просят — null', () => {
+    expect(analogQuery('сколько стоит касперский?')).toBeNull()
+    expect(analogQuery('а есть российский аналог?')).toBeNull()
+    expect(analogQuery('господи, а что с ценой?')).toBeNull()
   })
 })
 

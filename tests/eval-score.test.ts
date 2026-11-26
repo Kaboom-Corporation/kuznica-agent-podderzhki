@@ -13,6 +13,7 @@ describe('eval-score', () => {
   })
   it('что сделал агент', () => {
     expect(gotKind({ ...base, text: 'Сколько у вас сотрудников?' })).toBe('clarify')
+    expect(gotKind({ ...base, text: 'Astra Linux на 12 мес. — 3 100 ₽.\nСколько у вас рабочих мест?' })).toBe('answer')
     expect(gotKind({ ...base, text: 'Цена 6 739,20 ₽. Оформить КП?' })).toBe('answer')
     expect(gotKind({ ...base, escalated: true, proposalSkus: ['SL-1'] })).toBe('escalate')
   })

@@ -5,7 +5,7 @@
  */
 import { q, q1 } from '../lib/db'
 import { searchKb } from '../ported/rag/searcher'
-import { buildTsQueries } from './catalog-search'
+import { buildTsQueries, seatCount, termMonths } from './catalog-search'
 import { absorb, type Facts } from './verify'
 import { buildQuote, quoteForModel, rub, CONDITIONS, type CatalogItem, type Condition, type PriceRule } from './quote'
 
@@ -91,7 +91,8 @@ async function dispatch(name: string, args: Record<string, unknown>, t: Turn): P
       // модель иногда сокращает запрос — ищем и по нему, и по словам клиента
       return search(`${str(args.query)} ${t.question}`.trim(), t)
     case 'check_stock':
-      return checkStock(str(args.query))
+      // модель часто теряет «на 3 устройства, на год» — число мест и срок добираем из вопроса клиента
+      return checkStock(str(args.query), t.question)
     case 'get_price': {
       const r = await quote(args, t)
       return 'error' in r ? r : quoteForModel(r.quote)
@@ -143,9 +144,9 @@ async function search(query: string, t: Turn) {
   return out
 }
 
-async function checkStock(query: string) {
+async function checkStock(query: string, question = '') {
   if (!query) return { error: 'пустой запрос' }
-  const rows = await findItems(query)
+  const rows = await findItems(query, question)
   if (!rows.length) return { items: [], note: 'Такого товара в каталоге нет. Предложи уточнить или передай менеджеру.' }
   return {
     items: rows.map(r => ({
@@ -169,17 +170,27 @@ async function checkStock(query: string) {
  * Сначала точный артикул, потом полнотекст «все слова», потом «любое слово».
  * Ранг: совпадение по названию весит больше описания; то, что можно заказать сейчас, — выше.
  */
-async function findItems(query: string): Promise<CatalogItem[]> {
+const SPECIAL_TERMS = '(акци|trade|трейд|продлен|обновлен|образоват|дошкол|академ|учебн|государств|госзаказ|миграц|замещ)'
+
+export async function findItems(query: string, question = ''): Promise<CatalogItem[]> {
   const bySku = await q<CatalogItem>('select * from catalog_items where upper(sku) = upper($1)', [query.trim()])
   if (bySku.length) return bySku
   const tq = buildTsQueries(query)
   if (!tq) return []
+  const seats = seatCount(query) ?? seatCount(question)
+  const term = termMonths(query) ?? termMonths(question)
   const run = (expr: string) => q<CatalogItem>(
     `select c.* from catalog_items c, to_tsquery('russian', $1) tq
       where c.search_tsv @@ tq
-      order by ts_rank(c.search_tsv, tq, 1) + case when c.stock <> 0 then 0.1 else 0 end + 0.2 * word_similarity($2, c.name) desc
+      order by ts_rank(c.search_tsv, tq, 1) + case when c.stock <> 0 then 0.1 else 0 end + 0.2 * word_similarity($2, c.name)
+        + case when $3::text is not null and c.name ~* ('(^|[^0-9])' || $3::text || '\\s*(устр|пк|компьют|польз|раб|лиц|мест)') then 0.3 else 0 end
+        + case when c.term_months = $4::int then 0.2 else 0 end
+        -- модули и дополнения («КОМПАС-3D v25: Оборудование», «компонент к Компас-3D») ниже самого продукта
+        - case when c.name ~ ':' or c.name ~* '\\sк\\s' then 0.2 else 0 end
+        -- особые условия (акция, продление, для школ и вузов) — только если клиент сам о них заговорил
+        - case when c.name ~* $6 and $5 !~* $6 then 0.3 else 0 end desc
       limit 8`,
-    [expr, query],
+    [expr, query, seats == null ? null : String(seats), term, `${query} ${question}`, SPECIAL_TERMS],
   )
   const all = await run(tq.all)
   return all.length >= 3 ? all : [...all, ...(await run(tq.any)).filter(r => !all.some(a => a.sku === r.sku))].slice(0, 8)

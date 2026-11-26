@@ -12,8 +12,9 @@ import { costRub } from '../ported/ai/pricing'
 import type { AIMessage } from '../ported/ai/provider'
 import { pickLlm, type Llm } from './llm'
 import { systemPrompt, systemTail } from './prompt'
+import { analogQuery } from './catalog-search'
 import { TOOL_DEFS, runTool, type Turn, type Source, type Draft, type Escalation } from './tools'
-import { absorbQuestion, checkActions, describe, emptyFacts, verifyAnswer, type Verdict } from './verify'
+import { absorbQuestion, checkActions, checkRegistry, describe, emptyFacts, verifyAnswer, type Verdict } from './verify'
 
 export const MAX_STEPS = 8
 /** Потолок входа на одно обращение: дальше цикл обрывается, чтобы запрос не стоил как десять. */
@@ -87,6 +88,8 @@ export async function ask(input: AskInput): Promise<AgentReply> {
   const system = systemPrompt(process.env.NUXT_PUBLIC_SHOP_NAME || 'Демо Софт')
   let steps = 0
   let forcedSearch = false
+  let forcedCatalog = false
+  const earlierUser = history.flatMap((h, i) => h.role === 'user' ? [maskedParts[i] ?? h.content] : [])
   let retriedVerify = false
   let final = ''
   let verdict: Verdict = { ok: true, checked: [], mismatches: [] }
@@ -126,6 +129,20 @@ export async function ask(input: AskInput): Promise<AgentReply> {
     })
 
     if (!res.toolCalls?.length) {
+      // Просят российский аналог, а в каталог модель не заглянула — ищет код и даёт второй заход.
+      const analog = forcedCatalog || t.calls.some(c => c.name === 'check_stock') || t.drafts.length || t.escalation
+        ? null
+        : analogQuery(maskedQuestion, earlierUser)
+      if (analog) {
+        forcedCatalog = true
+        const id = 'auto-catalog'
+        const out = await runTool('check_stock', { query: analog }, t)
+        msgs.push(
+          { role: 'assistant', content: '', tool_calls: [{ id, type: 'function', function: { name: 'check_stock', arguments: JSON.stringify({ query: analog }) } }] },
+          { role: 'tool', tool_call_id: id, name: 'check_stock', content: toJson(out) },
+        )
+        continue
+      }
       // Ответ по памяти на содержательный вопрос: поиск делает код и даёт модели второй заход.
       if (!forcedSearch && !t.searched && !t.drafts.length && !t.escalation && maskedQuestion.split(/\s+/).length >= 5) {
         forcedSearch = true
@@ -144,14 +161,15 @@ export async function ask(input: AskInput): Promise<AgentReply> {
         invoice: t.drafts.some(d => d.kind === 'invoice'),
         handoff: !!t.escalation,
       })
-      if (claims.length) verdict = { ok: false, checked: [...verdict.checked, ...claims.map(c => `действие: ${c.value}`)], mismatches: [...verdict.mismatches, ...claims] }
+      claims.push(...checkRegistry(final, t.facts))
+      if (claims.length) verdict = { ok: false, checked: [...verdict.checked, ...claims.map(c => `${c.kind}: ${c.value}`)], mismatches: [...verdict.mismatches, ...claims] }
       if (!verdict.ok && !retriedVerify && steps < MAX_STEPS) {
         retriedVerify = true
         msgs.push(
           { role: 'assistant', content: final },
           {
             role: 'user',
-            content: `[проверка магазина, клиент этого не видит] В ответе есть то, чего нет в данных инструментов: ${verdict.mismatches.map(describe).join('; ')}. Перепиши ответ: возьми цифры из инструментов слово в слово или вызови нужный инструмент (КП — draft_proposal, счёт — draft_invoice, менеджер — handoff_to_manager). Если данных нет — убери это из ответа или передай менеджеру.`,
+            content: `[проверка магазина, клиент этого не видит] В ответе есть то, чего нет в данных инструментов: ${verdict.mismatches.map(describe).join('; ')}. Перепиши ответ: возьми цифры из инструментов слово в слово или вызови нужный инструмент (КП — draft_proposal, счёт — draft_invoice, менеджер — handoff_to_manager). Если данных нет — убери это из ответа или передай менеджеру. Клиент прошлый вариант не видел: не извиняйся и не упоминай проверку, просто дай исправленный ответ.`,
           },
         )
         continue

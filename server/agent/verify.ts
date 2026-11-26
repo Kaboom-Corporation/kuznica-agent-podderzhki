@@ -29,19 +29,22 @@ export interface Facts {
   dates: Set<string>
   /** прочие числа из фактов и из вопроса клиента: количества, сроки, артикулы */
   numbers: Set<string>
+  /** что модель видела в каталоге: артикул и начало названия → есть ли отметка «в реестре» */
+  registry: Array<{ sku: string; title: string; inRegistry: boolean }>
 }
 
 export function emptyFacts(today = new Date()): Facts {
-  const f: Facts = { today, money: new Set(), percents: new Set(), dates: new Set(), numbers: new Set() }
+  const f: Facts = { today, money: new Set(), percents: new Set(), dates: new Set(), numbers: new Set(), registry: [] }
   f.dates.add(iso(today))
   return f
 }
 
-export interface Mismatch { kind: 'сумма' | 'процент' | 'дата' | 'число' | 'действие'; value: string }
+export interface Mismatch { kind: 'сумма' | 'процент' | 'дата' | 'число' | 'действие' | 'реестр'; value: string }
 export interface Verdict { ok: boolean; checked: string[]; mismatches: Mismatch[] }
 
 export function describe(m: Mismatch): string {
   if (m.kind === 'действие') return `в ответе сказано «${m.value}», но инструмент для этого не вызывался`
+  if (m.kind === 'реестр') return `«${m.value}» назван «в реестре», но в каталоге у него отметки «в реестре российского ПО» нет — не пиши про реестр для этой позиции`
   return `${m.kind} «${m.value}» нет в данных магазина`
 }
 
@@ -98,6 +101,35 @@ export function absorb(facts: Facts, value: unknown): void {
   for (const m of text.matchAll(PCT_RE)) facts.percents.add(Number(m[1]!.replace(',', '.')))
   for (const m of text.matchAll(DATE_ISO_RE)) facts.dates.add(`${m[1]}-${m[2]}-${m[3]}`)
   for (const m of text.matchAll(NUMBER_RE)) facts.numbers.add(String(Number(m[0])))
+  const items = (value as { items?: unknown })?.items
+  if (Array.isArray(items)) {
+    for (const it of items as Array<{ sku?: unknown; name?: unknown; in_registry?: unknown }>) {
+      if (typeof it?.sku !== 'string' || typeof it.name !== 'string' || typeof it.in_registry !== 'string') continue
+      // «РЕД СОФТ РЕД ОС, Простая лицензия…» → «ред софт ред ос»: так модель обычно называет продукт
+      const title = it.name.split(/[,(«]/)[0]!.trim().toLowerCase()
+      facts.registry.push({ sku: it.sku, title, inRegistry: !it.in_registry.startsWith('нет') })
+    }
+  }
+}
+
+/**
+ * «В реестре» можно писать только про позиции с этой отметкой в каталоге. Проверяем по абзацам:
+ * в абзаце, где сказано «в реестре» (без «нет/не»), не должно быть артикула или названия позиции без отметки.
+ */
+export function checkRegistry(answer: string, facts: Facts): Mismatch[] {
+  const out: Mismatch[] = []
+  for (const block of answer.split(/\n\s*\n/)) {
+    const b = block.toLowerCase()
+    if (!/(?<!(нет|не)\s)в\s+реестр/.test(b)) continue
+    for (const r of facts.registry) {
+      if (r.inRegistry) continue
+      const hit = b.includes(r.sku.toLowerCase()) || (r.title.length >= 6 && b.includes(r.title))
+      // то же название может быть и у позиции с отметкой — тогда по названию не ругаемся
+      const twin = facts.registry.some(o => o.inRegistry && o.title === r.title && !b.includes(r.sku.toLowerCase()))
+      if (hit && !twin && !out.some(m => m.value === r.title || m.value === r.sku)) out.push({ kind: 'реестр', value: b.includes(r.sku.toLowerCase()) ? r.sku : r.title })
+    }
+  }
+  return out
 }
 
 /** Цифры, которые назвал сам клиент, тоже можно повторять («вы просили 50 лицензий»). */

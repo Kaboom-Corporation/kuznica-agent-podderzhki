@@ -27,7 +27,7 @@ const missing = skus.filter(s => !catalog.some(c => c.sku === s))
 if (missing.length) console.warn(`в каталоге нет SKU из набора: ${missing.join(', ')} — загружен ли фид?`)
 
 const out = `eval/results-${new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)}.json`
-const results: Array<{ id: string; category?: string; seconds: number; costRub: number; steps: number; tools: string[]; score: Score | null; error?: string; answer: string }> = []
+const results: Array<{ id: string; category?: string; seconds: number; costRub: number; steps: number; tools: string[]; score: Score | null; error?: string; answer: string; transcript?: Array<{ q: string; a: string; tools: string[] }> }> = []
 
 for (const item of items) {
   const turns = item.turns ?? [item.question ?? '']
@@ -37,11 +37,13 @@ for (const item of items) {
   const tools: string[] = []
   const drafts: string[] = []
   const sources = new Set<string>()
+  const transcript: Array<{ q: string; a: string; tools: string[] }> = []
   try {
     let last: Awaited<ReturnType<typeof ask>> | null = null
     for (const text of turns) {
       last = await ask({ channel: item.channel, text, llm, conversationId })
       conversationId = last.conversationId
+      transcript.push({ q: text, a: last.text, tools: last.run.tools.map(c => c.name) })
       cost += last.run.costRub
       steps += last.run.steps
       tools.push(...last.run.tools.map(c => c.name))
@@ -54,7 +56,7 @@ for (const item of items) {
       : []
     const o: Observed = { text: last!.text, escalated: !!last!.escalation, proposalSkus, sourceSlugs: [...sources], verifyOk: last!.verify.ok }
     const s = score(item, o, catalog)
-    results.push({ id: item.id, category: item.category, seconds: (Date.now() - t0) / 1000, costRub: cost, steps, tools, score: s, answer: o.text })
+    results.push({ id: item.id, category: item.category, seconds: (Date.now() - t0) / 1000, costRub: cost, steps, tools, score: s, answer: o.text, ...(turns.length > 1 ? { transcript } : {}) })
     console.log(`${s.pass ? '✓' : '✗'} ${item.id} [${item.category ?? '-'}] ждали ${item.expect.kind}, вышло ${s.got} · ${((Date.now() - t0) / 1000).toFixed(0)} с · ${tools.join(',') || '—'}${s.fails.length ? ` · не прошло: ${s.fails.join('; ')}` : ''}`)
   }
   catch (e) {

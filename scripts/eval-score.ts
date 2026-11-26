@@ -61,7 +61,7 @@ export function hasPrice(text: string, cents: bigint): boolean {
 export function gotKind(o: Observed): Kind {
   if (o.escalated) return 'escalate'
   if (o.proposalSkus.length) return 'proposal'
-  if (/\?\s*$|\?\s*\n/m.test(o.text.trim()) && !/\d[\d\s ]*,\d\d\s*₽/.test(o.text)) return 'clarify'
+  if (/\?\s*$|\?\s*\n/m.test(o.text.trim()) && !/\d[\d\s ]*(,\d\d)?\s*(₽|руб)/.test(o.text)) return 'clarify' // вопрос после вариантов с ценой — ответ, а не уточнение
   return 'answer'
 }
 
