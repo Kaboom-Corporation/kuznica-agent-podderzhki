@@ -12,11 +12,12 @@ import { costRub } from '../ported/ai/pricing'
 import type { AIMessage } from '../ported/ai/provider'
 import { pickLlm, type Llm } from './llm'
 import { systemPrompt, systemTail } from './prompt'
-import { analogQuery } from './catalog-search'
+import { analogQuery, selectionQueries } from './catalog-search'
 import { TOOL_DEFS, runTool, type Turn, type Source, type Draft, type Escalation } from './tools'
 import { absorbQuestion, checkActions, checkRegistry, describe, emptyFacts, verifyAnswer, type Verdict } from './verify'
 
 export const MAX_STEPS = 8
+export const MAX_CALLS_PER_STEP = 3
 /** Потолок входа на одно обращение: дальше цикл обрывается, чтобы запрос не стоил как десять. */
 export const MAX_INPUT_TOKENS = 120_000
 export const MAX_QUESTION_CHARS = 4000
@@ -90,7 +91,9 @@ export async function ask(input: AskInput): Promise<AgentReply> {
   let forcedSearch = false
   let forcedCatalog = false
   const earlierUser = history.flatMap((h, i) => h.role === 'user' ? [maskedParts[i] ?? h.content] : [])
+  t.earlier = earlierUser
   let retriedVerify = false
+  let retriedTimeout = false
   let final = ''
   let verdict: Verdict = { ok: true, checked: [], mismatches: [] }
 
@@ -112,6 +115,12 @@ export async function ask(input: AskInput): Promise<AgentReply> {
       })
     }
     catch (err) {
+      // Тайм-аут бывает разовым (общий GPU занят): один повтор шага, потом — менеджеру.
+      if (!retriedTimeout && /timeout|aborted/i.test((err as Error).message)) {
+        retriedTimeout = true
+        console.error(`[agent] ${llm.kind}:${llm.model} шаг ${steps}: тайм-аут, повторяю`)
+        continue
+      }
       // Модель упала или не ответила: клиент не должен остаться без ответа — передаём менеджеру с причиной.
       console.error(`[agent] ${llm.kind}:${llm.model} шаг ${steps}:`, (err as Error).message)
       if (process.env.NUXT_AGENT_DEBUG) console.error('[agent] сообщения:', msgs.map(m => `${m.role}${(m as any).tool_calls ? `→${(m as any).tool_calls.map((c: any) => c.function.name)}` : ''}:${String(m.content ?? '').length}`).join(' | '))
@@ -141,6 +150,18 @@ export async function ask(input: AskInput): Promise<AgentReply> {
           { role: 'assistant', content: '', tool_calls: [{ id, type: 'function', function: { name: 'check_stock', arguments: JSON.stringify({ query: analog }) } }] },
           { role: 'tool', tool_call_id: id, name: 'check_stock', content: toJson(out) },
         )
+        continue
+      }
+      // Подбор «не знаю, что нужно»: варианты должны быть из каталога — открываем его сами.
+      const picks = forcedCatalog || t.calls.some(c => c.name === 'check_stock') || t.drafts.length || t.escalation
+        ? []
+        : selectionQueries(maskedQuestion, earlierUser)
+      if (picks.length) {
+        forcedCatalog = true
+        const calls = picks.map((query, i) => ({ id: `auto-pick-${i}`, type: 'function' as const, function: { name: 'check_stock', arguments: JSON.stringify({ query }) } }))
+        msgs.push({ role: 'assistant', content: '', tool_calls: calls })
+        for (const [i, query] of picks.entries())
+          msgs.push({ role: 'tool', tool_call_id: calls[i]!.id, name: 'check_stock', content: toJson(await runTool('check_stock', { query }, t)) })
         continue
       }
       // Ответ по памяти на содержательный вопрос: поиск делает код и даёт модели второй заход.
@@ -177,8 +198,11 @@ export async function ask(input: AskInput): Promise<AgentReply> {
       break
     }
 
-    msgs.push({ role: 'assistant', content: res.text || '', tool_calls: res.rawToolCalls })
-    for (const call of res.toolCalls) {
+    // Малые модели зовут по 8 поисков за шаг: ответы не влезают в контекст, и сервер обрезает
+    // начало разговора вместе с вопросом клиента. Больше MAX_CALLS_PER_STEP за шаг не выполняем.
+    const calls = res.toolCalls.slice(0, MAX_CALLS_PER_STEP)
+    msgs.push({ role: 'assistant', content: res.text || '', tool_calls: res.rawToolCalls?.slice(0, MAX_CALLS_PER_STEP) })
+    for (const call of calls) {
       // метки ПДн в аргументах (почта клиента для КП) — обратно в настоящие значения только внутри магазина
       const args = JSON.parse(pii.restore(JSON.stringify(call.arguments ?? {})))
       const out = await runTool(call.name, args, t)

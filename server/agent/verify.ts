@@ -136,6 +136,12 @@ export function checkRegistry(answer: string, facts: Facts): Mismatch[] {
 export function absorbQuestion(facts: Facts, question: string): void {
   for (const m of question.matchAll(NUMBER_RE)) facts.numbers.add(String(Number(m[0])))
   for (const m of question.matchAll(MONEY_RE)) facts.money.add(moneyCents(m))
+  // бюджет без знака рубля: «до 400 тысяч», «400к», «1,5 млн» — модель повторит его как «400 тыс. ₽»
+  for (const m of question.matchAll(/(?<![\d.,])(\d+(?:[.,]\d+)?)\s*(тыс\p{L}*|т\.р|к(?!\p{L})|млн|миллион\p{L}*)/giu)) {
+    const n = Number(m[1]!.replace(',', '.'))
+    const mult = /^(млн|миллион)/i.test(m[2]!) ? 1_000_000 : 1000
+    facts.money.add(BigInt(Math.round(n * mult * 100)))
+  }
 }
 
 function moneyCents(m: RegExpMatchArray): bigint {

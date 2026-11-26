@@ -70,6 +70,12 @@ export function seatCount(query: string): number | null {
   return m ? Number(m[1]) : null
 }
 
+/** Цена позиции — за одно место («по количеству узлов»), а не за комплект «на 50 ПК». */
+export function perSeat(name: string): boolean {
+  return /количеств\p{L}*\s+(узл|пользоват|устр|почтов)|за\s+(узел|пользователя|устройство)/iu.test(name)
+    && !/на\s+\d+\s*(пк|устр|польз|раб)/iu.test(name)
+}
+
 /** Срок в месяцах из запроса («на год», «2 года», «36 мес»): поднимаем позиции с таким сроком. */
 export function termMonths(query: string): number | null {
   const s = query.toLowerCase()
@@ -108,6 +114,25 @@ export function analogQuery(question: string, earlier: string[] = []): string | 
       return `${query} на 1 год${seats ? ` на ${seats} пк` : ''}`
     }
   return null
+}
+
+// класс задачи → что открыть в каталоге для подбора (число мест поиск берёт из реплик клиента)
+const SELECTION: Array<[RegExp, string[]]> = [
+  [/антивирус|вирус|защит|почт|файл|касперск|kaspersky/, ['kaspersky endpoint security для бизнеса', 'доктор веб комплексная защита']],
+]
+const NEEDS_HELP = /не знаю|не знаем|подбер|подобрать|посовет|что выбрать|что лучше|что нам нужно|что нужно/
+
+/**
+ * Клиент не знает, что выбрать, и уже ответил на уточнения — какие запросы отправить в каталог,
+ * чтобы варианты и цены были из каталога, а не из акций базы знаний. Первая реплика остаётся
+ * за уточнениями: без прошлых реплик — пусто. Просьба об аналоге — это analogQuery, не сюда.
+ */
+export function selectionQueries(question: string, earlier: string[] = []): string[] {
+  if (!earlier.length || WANTS_ANALOG.test(question.toLowerCase())) return []
+  const texts = [...earlier, question].map(s => s.toLowerCase())
+  if (!texts.some(s => NEEDS_HELP.test(s))) return []
+  for (const text of texts) for (const [re, queries] of SELECTION) if (re.test(text)) return queries
+  return []
 }
 
 /** tsquery: «все слова» (and) — точнее; «любое слово» (or) — запасной, если по «все» пусто. */

@@ -1,6 +1,24 @@
 import { describe, expect, it } from 'vitest'
-import { analogQuery, buildTsQueries, queryWords, seatCount, termMonths } from '../server/agent/catalog-search'
+import { analogQuery, buildTsQueries, queryWords, seatCount, selectionQueries, termMonths } from '../server/agent/catalog-search'
 import { decode, parseOffer } from '../scripts/ingest-feed'
+
+describe('подбор «не знаю, что нужно»', () => {
+  const first = 'не знаю что нам нужно, хочу защитить почту и файлы для 50 сотрудников'
+  it('первая реплика — за уточнениями, после ответа открываем каталог', () => {
+    expect(selectionQueries(first)).toEqual([])
+    expect(selectionQueries('у нас Windows, бюджет до 400 тысяч', [first])).toContain('kaspersky endpoint security для бизнеса')
+  })
+  it('цена за узел или за комплект', async () => {
+    const { perSeat } = await import('../server/agent/catalog-search')
+    expect(perSeat('Kaspersky Endpoint Security для бизнеса Расширенный лицензия Base на 1 год по количеству узлов')).toBe(true)
+    expect(perSeat('Kaspersky Endpoint Security для бизнеса Стандартный базовая лицензия на 1 год. Количество узлов')).toBe(true)
+    expect(perSeat('Доктор Веб Комплексная защита + Центр управления на 1 год на 50 ПК')).toBe(false)
+  })
+  it('знает товар или просит аналог — не подбор', () => {
+    expect(selectionQueries('сколько стоит Kaspersky Standard?', ['добрый день'])).toEqual([])
+    expect(selectionQueries('а есть российский аналог?', [first])).toEqual([])
+  })
+})
 
 describe('catalog-search', () => {
   it('выкидывает числа и пунктуацию, бренды пишет обоими способами', () => {

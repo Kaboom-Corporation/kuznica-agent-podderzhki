@@ -32,6 +32,12 @@ describe('quote', () => {
 
 describe('verify', () => {
   const today = new Date(2026, 10, 26)
+  it('бюджет клиента без знака рубля можно повторить', () => {
+    const f = emptyFacts(today)
+    absorbQuestion(f, 'бюджет примерно до 400 тысяч, максимум 1,5 млн')
+    expect(verifyAnswer('С вашим бюджетом до 400 тыс. руб. (а лучше не больше 1 500 000 ₽) подойдёт…', f).ok).toBe(true)
+    expect(verifyAnswer('Выйдет 450 тыс. ₽.', f).ok).toBe(false)
+  })
   it('пропускает цифры из инструментов и ловит выдуманные', () => {
     const f = emptyFacts(today)
     absorb(f, { total: '56 250,00 ₽', discount_pct: 25, lead_days: 10, valid_until: '2026-12-10' })

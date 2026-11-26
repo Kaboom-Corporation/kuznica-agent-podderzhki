@@ -5,7 +5,7 @@
  */
 import { q, q1 } from '../lib/db'
 import { searchKb } from '../ported/rag/searcher'
-import { buildTsQueries, seatCount, termMonths } from './catalog-search'
+import { buildTsQueries, perSeat, seatCount, termMonths } from './catalog-search'
 import { absorb, type Facts } from './verify'
 import { buildQuote, quoteForModel, rub, CONDITIONS, type CatalogItem, type Condition, type PriceRule } from './quote'
 
@@ -16,6 +16,8 @@ export interface Escalation { kind: 'no_answer' | 'needs_human' | 'low_confidenc
 export interface Turn {
   conversationId: string
   question: string
+  /** Прошлые реплики клиента: число мест и срок могли прозвучать раньше («на 50 сотрудников»). */
+  earlier?: string[]
   facts: Facts
   sources: Source[]
   drafts: Draft[]
@@ -92,7 +94,8 @@ async function dispatch(name: string, args: Record<string, unknown>, t: Turn): P
       return search(`${str(args.query)} ${t.question}`.trim(), t)
     case 'check_stock':
       // модель часто теряет «на 3 устройства, на год» — число мест и срок добираем из вопроса клиента
-      return checkStock(str(args.query), t.question)
+      // последняя реплика первой: её число мест главнее сказанного раньше
+      return checkStock(str(args.query), [t.question, ...(t.earlier ?? []).toReversed()].join('\n'))
     case 'get_price': {
       const r = await quote(args, t)
       return 'error' in r ? r : quoteForModel(r.quote)
@@ -148,8 +151,11 @@ async function checkStock(query: string, question = '') {
   if (!query) return { error: 'пустой запрос' }
   const rows = await findItems(query, question)
   if (!rows.length) return { items: [], note: 'Такого товара в каталоге нет. Предложи уточнить или передай менеджеру.' }
+  const seats = seatCount(query) ?? seatCount(question)
   return {
     items: rows.map(r => ({
+      // цена за узел/пользователя: итог за места клиента считает код, а не модель
+      ...(seats && seats > 1 && perSeat(r.name) ? { total_for_seats: `${rub(BigInt(r.price_cents) * BigInt(seats))} за ${seats} мест` } : {}),
       sku: r.sku,
       name: r.name,
       vendor: r.vendor,
@@ -160,7 +166,8 @@ async function checkStock(query: string, question = '') {
       in_stock: r.stock < 0 ? 'доступно к заказу' : r.stock > 0 ? `${r.stock} шт.` : 'сейчас нет в наличии — срок и возможность поставки уточнит менеджер',
       lead: r.lead_days == null ? 'срок поставки в каталоге не указан — не называй его, предложи уточнить у менеджера' : `${r.lead_days} раб. дн.`,
       in_registry: r.in_registry ? 'в реестре российского ПО' : 'нет в реестре',
-      description: r.description,
+      // описание фида бывает в килобайт: восемь позиций съедают контекст малой модели
+      description: r.description.length > 300 ? `${r.description.slice(0, 300)}…` : r.description,
       ...(r.url ? { url: r.url } : {}),
     })),
   }
@@ -170,7 +177,7 @@ async function checkStock(query: string, question = '') {
  * Сначала точный артикул, потом полнотекст «все слова», потом «любое слово».
  * Ранг: совпадение по названию весит больше описания; то, что можно заказать сейчас, — выше.
  */
-const SPECIAL_TERMS = '(акци|trade|трейд|продлен|обновлен|образоват|дошкол|академ|учебн|государств|госзаказ|миграц|замещ)'
+const SPECIAL_TERMS = '(акци|trade|трейд|продлен|обновлен|образоват|дошкол|академ|учебн|государств|госзаказ|миграц|замещ|cross|кросс)'
 
 export async function findItems(query: string, question = ''): Promise<CatalogItem[]> {
   const bySku = await q<CatalogItem>('select * from catalog_items where upper(sku) = upper($1)', [query.trim()])
@@ -178,13 +185,18 @@ export async function findItems(query: string, question = ''): Promise<CatalogIt
   const tq = buildTsQueries(query)
   if (!tq) return []
   const seats = seatCount(query) ?? seatCount(question)
-  const term = termMonths(query) ?? termMonths(question)
+  // срок не назван — обычно берут на год
+  const term = termMonths(query) ?? termMonths(question) ?? 12
   const run = (expr: string) => q<CatalogItem>(
     `select c.* from catalog_items c, to_tsquery('russian', $1) tq
       where c.search_tsv @@ tq
       order by ts_rank(c.search_tsv, tq, 1) + case when c.stock <> 0 then 0.1 else 0 end + 0.2 * word_similarity($2, c.name)
         + case when $3::text is not null and c.name ~* ('(^|[^0-9])' || $3::text || '\\s*(устр|пк|компьют|польз|раб|лиц|мест)') then 0.3 else 0 end
         + case when c.term_months = $4::int then 0.2 else 0 end
+        -- цена за место зависит от диапазона («К-во узлов от 50 до 99»): свой диапазон выше, чужие ниже
+        + case when $3::text is null or c.description !~ 'узлов от \\d+ до \\d+' then 0
+            when $3::int between substring(c.description from 'узлов от (\\d+)')::int and substring(c.description from 'узлов от \\d+ до (\\d+)')::int then 0.4
+            else -0.3 end
         -- модули и дополнения («КОМПАС-3D v25: Оборудование», «компонент к Компас-3D») ниже самого продукта
         - case when c.name ~ ':' or c.name ~* '\\sк\\s' then 0.2 else 0 end
         -- особые условия (акция, продление, для школ и вузов) — только если клиент сам о них заговорил
