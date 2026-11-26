@@ -1,0 +1,12 @@
+node_modules
+.nuxt
+.output
+.data
+dist
+.env
+.env.*
+!config.example.env
+*.log
+storage/
+eval/results-*.json
+.DS_Store

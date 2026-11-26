@@ -1,0 +1,56 @@
+// Nuxt 4 + Nitro: веб-чат клиента, панель менеджера и API агента в одном процессе.
+export default defineNuxtConfig({
+  compatibilityDate: '2026-11-01',
+  devtools: { enabled: false },
+  css: ['~/assets/main.css'],
+  app: {
+    head: {
+      htmlAttrs: { lang: 'ru' },
+      title: 'Агент поддержки — консультация, КП, счёт',
+      meta: [{ name: 'viewport', content: 'width=device-width, initial-scale=1' }],
+    },
+  },
+  nitro: {
+    // Шрифты для PDF счёта/КП кладём в серверные ассеты (useStorage('assets:fonts')).
+    serverAssets: [{ baseName: 'fonts', dir: './assets/fonts' }],
+    experimental: { tasks: true },
+    scheduledTasks: {
+      // Опрос входящей почты (IMAP), если настроен.
+      '*/1 * * * *': ['mail:poll'],
+    },
+  },
+  runtimeConfig: {
+    databaseUrl: 'postgres://agent:agent@localhost:5433/agent',
+    // Модель агента (OpenAI-совместимый шлюз: RouterAI / OpenRouter / Ollama).
+    llmBaseUrl: 'https://routerai.ru/api/v1',
+    llmApiKey: '',
+    llmModel: 'anthropic/claude-haiku-5.5',
+    llmModelStrong: 'anthropic/claude-sonnet-5.5',
+    // Прямой Anthropic (если задан ключ — используется он).
+    anthropicApiKey: '',
+    anthropicBaseUrl: 'https://api.anthropic.com',
+    anthropicModel: 'claude-haiku-5-5',
+    // Эмбеддинги: OpenAI-совместимый /embeddings (Ollama локально по умолчанию — ПДн не уходят наружу).
+    embedBaseUrl: 'http://localhost:11434/v1',
+    embedApiKey: '',
+    embedModel: 'bge-m3',
+    embedDim: 1024,
+    // Почта
+    smtpHost: '', smtpPort: 465, smtpUser: '', smtpPass: '', smtpFrom: '',
+    imapHost: '', imapPort: 993, imapUser: '', imapPass: '',
+    // Продавец на документах — вымышленное «ООО Демо», реальные реквизиты в репозиторий не кладём.
+    sellerName: 'ООО «Демо Софт»',
+    sellerInn: '7700000000',
+    sellerKpp: '770001001',
+    sellerAddress: '123456, г. Москва, ул. Примерная, д. 1',
+    sellerBank: 'АО «Демо-Банк»',
+    sellerBik: '044500000',
+    sellerAccount: '40702810000000000000',
+    sellerCorrAccount: '30101810000000000000',
+    vatPercent: 22,
+    managerToken: 'demo',
+    public: {
+      shopName: 'Демо Софт — магазин лицензий',
+    },
+  },
+})
