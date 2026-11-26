@@ -133,6 +133,7 @@ async function search(query: string, t: Turn) {
       doc: h.slug,
       title: h.title,
       section: h.heading,
+      ...(/^https?:\/\//.test(h.source) ? { url: h.source } : {}),
       text: h.content,
       ...(expired ? { expired: `УСТАРЕЛО: действовало до ${String(h.validTo).slice(0, 10)}. Не отвечай по этому куску, если есть действующий.` } : {}),
     }

@@ -86,7 +86,8 @@ async function main() {
     }
 
     await client.query('delete from kb_documents')
-    const kbDir = join(DATA, 'kb')
+    // --kb <папка>: папка с .md напрямую (например, data/kb-softline из scripts/fetch_kb.py)
+    const kbDir = KB_ONLY && args.some(a => !a.startsWith('--')) ? DATA : join(DATA, 'kb')
     const files = readdirSync(kbDir).filter(f => f.endsWith('.md')).sort()
     const pending: { id: number; heading: string | null; content: string; title: string }[] = []
     for (const f of files) {
@@ -95,7 +96,7 @@ async function main() {
       const title = meta.title || slug
       const doc = await client.query<{ id: number }>(
         `insert into kb_documents (slug, title, source, valid_from, valid_to) values ($1,$2,$3,$4,$5) returning id`,
-        [slug, title, `data/kb/${f}`, nullable(meta.valid_from), nullable(meta.valid_to)],
+        [slug, title, meta.source || join(kbDir, f), nullable(meta.valid_from), nullable(meta.valid_to)],
       )
       chunkMarkdown(body).forEach((c, idx) => pending.push({ id: doc.rows[0]!.id, heading: c.heading, content: c.content, title, ...{ idx } } as any))
     }
