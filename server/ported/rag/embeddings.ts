@@ -64,12 +64,21 @@ async function embedBatch(batch: string[]): Promise<{ vectors: number[][], token
 }
 
 /**
+ * Предохранитель: эндпоинт эмбеддингов упал (например, GPU-узел молчит) — 5 минут не ходим к нему вовсе.
+ * Иначе каждый поиск ждёт таймаут 15 с, и агент на запасной модели (RouterAI) отвечает клиенту на полминуты дольше.
+ * Поиск без векторов не ломается: остаются полнотекст и триграммы.
+ */
+const EMBED_COOLDOWN_MS = 5 * 60_000
+let embedDownUntil = 0
+
+/**
  * Эмбеддинги массива текстов пачками по 32. Возвращает векторы в порядке входа и число токенов (из usage провайдера,
  * либо оценка по символам). Сбой провайдера — EmbeddingUnavailableError.
  */
 export async function embedTexts(texts: string[]): Promise<{ vectors: number[][], tokens: number }> {
   const vectors: number[][] = []
   let tokens = 0
+  if (Date.now() < embedDownUntil) throw new EmbeddingUnavailableError(new Error('эмбеддинги недоступны, пауза после сбоя'))
   try {
     for (let i = 0; i < texts.length; i += BATCH_SIZE) {
       const r = await embedBatch(texts.slice(i, i + BATCH_SIZE))
@@ -78,6 +87,7 @@ export async function embedTexts(texts: string[]): Promise<{ vectors: number[][]
     }
   }
   catch (err) {
+    embedDownUntil = Date.now() + EMBED_COOLDOWN_MS
     throw err instanceof EmbeddingUnavailableError ? err : new EmbeddingUnavailableError(err)
   }
   return { vectors, tokens }
