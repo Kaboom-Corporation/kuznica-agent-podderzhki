@@ -137,7 +137,7 @@ async function search(query: string, t: Turn) {
       doc: h.slug,
       title: h.title,
       section: h.heading,
-      ...(/^https?:\/\//.test(h.source) ? { url: h.source } : {}),
+      // адрес исходной страницы базы знаний — тоже сайт заказчика; документ клиенту называем по title
       text: h.content,
       ...(expired ? { expired: `УСТАРЕЛО: действовало до ${String(h.validTo).slice(0, 10)}. Не отвечай по этому куску, если есть действующий.` } : {}),
     }
@@ -168,8 +168,8 @@ async function checkStock(query: string, question = '') {
       in_registry: r.in_registry ? 'в реестре российского ПО' : 'нет отметки о реестре',
       ...(russianVendor(r.vendor) ? { developer: 'российский разработчик' } : {}),
       // описание фида бывает в килобайт: восемь позиций съедают контекст малой модели
+      // ссылку на страницу товара модели не даём: в фиде это магазин заказчика, а продавец в демо — «Демо Софт»
       description: r.description.length > 300 ? `${r.description.slice(0, 300)}…` : r.description,
-      ...(r.url ? { url: r.url } : {}),
     })),
   }
 }
