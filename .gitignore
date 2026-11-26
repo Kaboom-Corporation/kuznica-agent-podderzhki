@@ -10,3 +10,4 @@ dist
 storage/
 eval/results-*.json
 .DS_Store
+.gstack/

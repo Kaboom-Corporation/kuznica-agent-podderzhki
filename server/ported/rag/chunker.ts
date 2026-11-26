@@ -160,9 +160,11 @@ export function chunkMarkdown(markdown: string, options?: ChunkOptions): Markdow
   let inFence = false
   for (const line of lines) {
     if (/^\s*```/.test(line)) inFence = !inFence
-    const h = !inFence ? /^##\s+(.+?)\s*#*\s*$/.exec(line) : null
-    if (h) {
-      sections.push({ heading: h[1]!, body: [] })
+    // без пересекающихся квантификаторов (было /^##\s+(.+?)\s*#*\s*$/ — полиномиальный перебор на длинной строке)
+    const h = !inFence ? /^##[ \t]+(.*)$/.exec(line) : null
+    const heading = h ? h[1]!.replace(/[\s#]+$/, '') : ''
+    if (h && heading) {
+      sections.push({ heading, body: [] })
       continue
     }
     if (!inFence && /^#\s+/.test(line) && sections.length === 1 && !sections[0]!.body.some(l => l.trim())) continue

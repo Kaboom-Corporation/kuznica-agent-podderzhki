@@ -9,8 +9,9 @@
     "dev": "nuxt dev",
     "build": "nuxt build",
     "start": "node .output/server/index.mjs",
-    "ingest": "node --experimental-strip-types scripts/ingest.ts",
-    "eval": "node --experimental-strip-types scripts/eval.ts",
+    "ingest": "tsx scripts/ingest.ts",
+    "try": "tsx scripts/try-llm.ts",
+    "eval": "tsx scripts/eval.ts",
     "test": "vitest run",
     "typecheck": "tsgo --noEmit -p tsconfig.json"
   },
@@ -28,6 +29,7 @@
     "@types/node": "^24.0.0",
     "@types/nodemailer": "^7.0.11",
     "@types/pg": "^8.15.0",
+    "tsx": "^4.23.15",
     "vitest": "^5.1.2"
   }
 }

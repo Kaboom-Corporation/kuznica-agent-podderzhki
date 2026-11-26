@@ -234,7 +234,8 @@ async function draftInvoice(number: string, t: Turn) {
     [number],
   )
   if (!p) return { error: `КП ${number} не найдено. Сначала подготовь КП через draft_proposal.` }
-  if (p.conversation_id && p.conversation_id !== t.conversationId) return { error: 'это КП из другого обращения' }
+  // КП без обращения (обращение удалено) тоже чужое: счёт только по КП этого диалога
+  if (p.conversation_id !== t.conversationId) return { error: 'это КП из другого обращения' }
   const due = new Date(t.facts.today.getTime() + 5 * 86_400_000).toISOString().slice(0, 10)
   const row = await q1<{ id: string; number: string }>(
     `insert into invoices (number, proposal_id, total_cents, vat_cents, due_date)
