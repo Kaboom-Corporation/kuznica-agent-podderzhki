@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { buildQuote, rub, vatInside, type CatalogItem, type PriceRule } from '../server/agent/quote'
-import { absorb, absorbQuestion, emptyFacts, verifyAnswer } from '../server/agent/verify'
+import { absorb, absorbQuestion, checkActions, emptyFacts, verifyAnswer } from '../server/agent/verify'
 
 const item = (sku: string, price: bigint, extra: Partial<CatalogItem> = {}): CatalogItem => ({
   sku, name: sku, vendor: 'Вендор', category: 'antivirus', unit: 'лицензия', term_months: 12,
@@ -44,5 +44,14 @@ describe('verify', () => {
   it('не путает нумерацию, законы и метки ПДн с цифрами', () => {
     const f = emptyFacts(today)
     expect(verifyAnswer('3. Для закупки по 44-ФЗ напишем на Почта_3.', f).ok).toBe(true)
+  })
+  it('ловит «подготовил КП» без вызова инструмента', () => {
+    const none = { proposal: false, invoice: false, handoff: false }
+    expect(checkActions('Подготовил черновик КП. Менеджер проверит и отправит вам.', none).map(m => m.kind)).toEqual(['действие'])
+    expect(checkActions('Счёт выставлен, оплатите до пятницы.', none)).toHaveLength(1)
+    expect(checkActions('Я передал ваш вопрос менеджеру.', none)).toHaveLength(1)
+    // обещания и вопросы — не ложный факт
+    expect(checkActions('Подготовлю КП, как только уточните количество. Нужен ли счёт?', none)).toHaveLength(0)
+    expect(checkActions('Подготовил черновик КП КП-104.', { ...none, proposal: true })).toHaveLength(0)
   })
 })

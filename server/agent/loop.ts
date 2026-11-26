@@ -13,7 +13,7 @@ import type { AIMessage } from '../ported/ai/provider'
 import { pickLlm, type Llm } from './llm'
 import { systemPrompt, systemTail } from './prompt'
 import { TOOL_DEFS, runTool, type Turn, type Source, type Draft, type Escalation } from './tools'
-import { absorbQuestion, describe, emptyFacts, verifyAnswer, type Verdict } from './verify'
+import { absorbQuestion, checkActions, describe, emptyFacts, verifyAnswer, type Verdict } from './verify'
 
 export const MAX_STEPS = 8
 /** Потолок входа на одно обращение: дальше цикл обрывается, чтобы запрос не стоил как десять. */
@@ -93,18 +93,29 @@ export async function ask(input: AskInput): Promise<AgentReply> {
 
   while (steps < MAX_STEPS && usage.input < MAX_INPUT_TOKENS) {
     steps++
-    const res = await llm.provider.complete(msgs, {
-      system,
-      systemTail: systemTail(today),
-      cacheSystem: true,
-      tools: TOOL_DEFS as any,
-      gatewayModel: llm.model,
-      model: llm.model,
-      maxTokens: 1500,
-      temperature: 0.2,
-      noThinking: true,
-      timeoutMs: llm.timeoutMs,
-    })
+    let res: Awaited<ReturnType<typeof llm.provider.complete>>
+    try {
+      res = await llm.provider.complete(msgs, {
+        system,
+        systemTail: systemTail(today),
+        cacheSystem: true,
+        tools: TOOL_DEFS as any,
+        gatewayModel: llm.model,
+        model: llm.model,
+        maxTokens: 1500,
+        temperature: 0.2,
+        noThinking: true,
+        timeoutMs: llm.timeoutMs,
+      })
+    }
+    catch (err) {
+      // Модель упала или не ответила: клиент не должен остаться без ответа — передаём менеджеру с причиной.
+      console.error(`[agent] ${llm.kind}:${llm.model} шаг ${steps}:`, (err as Error).message)
+      if (process.env.NUXT_AGENT_DEBUG) console.error('[agent] сообщения:', msgs.map(m => `${m.role}${(m as any).tool_calls ? `→${(m as any).tool_calls.map((c: any) => c.function.name)}` : ''}:${String(m.content ?? '').length}`).join(' | '))
+      t.escalation ??= { kind: 'low_confidence', reason: `модель недоступна на шаге ${steps}: ${(err as Error).message.slice(0, 300)}` }
+      final = ''
+      break
+    }
     usage.input += res.inputTokens
     usage.output += res.outputTokens
     usage.cacheRead += res.cachedInputTokens ?? 0
@@ -128,13 +139,19 @@ export async function ask(input: AskInput): Promise<AgentReply> {
       }
       final = res.text.trim()
       verdict = verifyAnswer(final, t.facts)
+      const claims = checkActions(final, {
+        proposal: t.drafts.some(d => d.kind === 'proposal'),
+        invoice: t.drafts.some(d => d.kind === 'invoice'),
+        handoff: !!t.escalation,
+      })
+      if (claims.length) verdict = { ok: false, checked: [...verdict.checked, ...claims.map(c => `действие: ${c.value}`)], mismatches: [...verdict.mismatches, ...claims] }
       if (!verdict.ok && !retriedVerify && steps < MAX_STEPS) {
         retriedVerify = true
         msgs.push(
           { role: 'assistant', content: final },
           {
             role: 'user',
-            content: `[проверка магазина, клиент этого не видит] В ответе есть значения, которых нет в данных инструментов: ${verdict.mismatches.map(describe).join('; ')}. Перепиши ответ: возьми цифры из инструментов слово в слово или вызови нужный инструмент. Если данных нет — убери цифру или передай менеджеру.`,
+            content: `[проверка магазина, клиент этого не видит] В ответе есть то, чего нет в данных инструментов: ${verdict.mismatches.map(describe).join('; ')}. Перепиши ответ: возьми цифры из инструментов слово в слово или вызови нужный инструмент (КП — draft_proposal, счёт — draft_invoice, менеджер — handoff_to_manager). Если данных нет — убери это из ответа или передай менеджеру.`,
           },
         )
         continue

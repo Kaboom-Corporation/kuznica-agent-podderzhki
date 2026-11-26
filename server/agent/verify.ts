@@ -37,11 +37,31 @@ export function emptyFacts(today = new Date()): Facts {
   return f
 }
 
-export interface Mismatch { kind: 'сумма' | 'процент' | 'дата' | 'число'; value: string }
+export interface Mismatch { kind: 'сумма' | 'процент' | 'дата' | 'число' | 'действие'; value: string }
 export interface Verdict { ok: boolean; checked: string[]; mismatches: Mismatch[] }
 
 export function describe(m: Mismatch): string {
+  if (m.kind === 'действие') return `в ответе сказано «${m.value}», но инструмент для этого не вызывался`
   return `${m.kind} «${m.value}» нет в данных магазина`
+}
+
+// Утверждения о сделанном в прошедшем времени: «подготовил КП», «счёт выставлен», «передал менеджеру».
+// Будущее («подготовлю», «менеджер подготовит») не ловим — это обещание, а не ложный факт.
+const DONE = String.raw`(?:подготовил[аи]?|подготовлен[аоы]?|сформировал[аи]?|сформирован[аоы]?|составил[аи]?|составлен[аоы]?|оформил[аи]?|оформлен[аоы]?|создал[аи]?|создан[аоы]?|выставил[аи]?|выставлен[аоы]?)`
+const CLAIMS: Array<{ act: 'proposal' | 'invoice' | 'handoff'; re: RegExp }> = [
+  { act: 'proposal', re: new RegExp(String.raw`${DONE}[^.!?\n]{0,30}?(?:КП|коммерческ\p{L}* предложени\p{L}*)|(?:КП|коммерческ\p{L}* предложени\p{L}*)[^.!?\n]{0,30}?${DONE}`, 'iu') },
+  { act: 'invoice', re: new RegExp(String.raw`${DONE}[^.!?\n]{0,30}?сч[её]т(?!\p{L})|сч[её]т(?!\p{L})[^.!?\n]{0,30}?${DONE}`, 'iu') },
+  { act: 'handoff', re: /(?:передал[аи]?|передан[аоы]?|переда[ёе]тся)[^.!?\n]{0,30}?менеджер/iu },
+]
+
+/** Ответ утверждает, что действие сделано, а инструмент не вызывался. */
+export function checkActions(answer: string, done: { proposal: boolean; invoice: boolean; handoff: boolean }): Mismatch[] {
+  const out: Mismatch[] = []
+  for (const c of CLAIMS) {
+    const m = c.re.exec(answer)
+    if (m && !done[c.act]) out.push({ kind: 'действие', value: m[0].trim() })
+  }
+  return out
 }
 
 function iso(d: Date): string {
