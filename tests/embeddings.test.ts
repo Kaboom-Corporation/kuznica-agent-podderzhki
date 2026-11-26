@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { embedTexts, EmbeddingUnavailableError } from '../server/ported/rag/embeddings'
+import { embedTexts, EmbeddingUnavailableError, endpointDown } from '../server/ported/rag/embeddings'
 import { embedConfig, normalizeEmbedBase } from '../server/ported/rag/openai-base'
 
 afterEach(() => vi.unstubAllGlobals())
@@ -11,6 +11,17 @@ describe('embedConfig', () => {
   })
   it('Ollama без /v1 дополняется', () => {
     expect(normalizeEmbedBase('http://host:11434/')).toBe('http://host:11434/v1')
+  })
+})
+
+describe('пауза после сбоя', () => {
+  it('включается от недоступности, но не от ошибки на конкретном тексте', () => {
+    expect(endpointDown(new Error('HTTP 503 от http://x/embeddings'))).toBe(true)
+    expect(endpointDown(new Error('HTTP 429 от http://x/embeddings'))).toBe(true)
+    expect(endpointDown(new TypeError('fetch failed', { cause: new Error('connect ECONNREFUSED') }))).toBe(true)
+    expect(endpointDown(Object.assign(new Error('The operation was aborted due to timeout'), { name: 'TimeoutError' }))).toBe(true)
+    expect(endpointDown(new Error('HTTP 400 от http://x/embeddings: bad input'))).toBe(false)
+    expect(endpointDown(new Error('эндпоинт вернул 0 векторов на 1 текстов'))).toBe(false)
   })
 })
 

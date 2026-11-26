@@ -71,6 +71,13 @@ async function embedBatch(batch: string[]): Promise<{ vectors: number[][], token
 const EMBED_COOLDOWN_MS = 5 * 60_000
 let embedDownUntil = 0
 
+export function endpointDown(err: unknown): boolean {
+  const msg = err instanceof Error ? `${err.name} ${err.message} ${(err.cause as Error | undefined)?.message ?? ''}` : String(err)
+  const status = /HTTP (\d{3})/.exec(msg)?.[1]
+  if (status) return status === '429' || status.startsWith('5')
+  return /timeout|abort|fetch failed|ECONNREFUSED|ECONNRESET|ENOTFOUND|EHOSTUNREACH|ETIMEDOUT|socket/i.test(msg)
+}
+
 /**
  * Эмбеддинги массива текстов пачками по 32. Возвращает векторы в порядке входа и число токенов (из usage провайдера,
  * либо оценка по символам). Сбой провайдера — EmbeddingUnavailableError.
@@ -87,7 +94,9 @@ export async function embedTexts(texts: string[]): Promise<{ vectors: number[][]
     }
   }
   catch (err) {
-    embedDownUntil = Date.now() + EMBED_COOLDOWN_MS
+    // Пауза — только когда эндпоинт недоступен (сеть, таймаут, 5xx, 429). Ошибка на конкретном тексте (4xx,
+    // странный ответ) не должна выключать векторный поиск для всех клиентов.
+    if (endpointDown(err)) embedDownUntil = Date.now() + EMBED_COOLDOWN_MS
     throw err instanceof EmbeddingUnavailableError ? err : new EmbeddingUnavailableError(err)
   }
   return { vectors, tokens }
