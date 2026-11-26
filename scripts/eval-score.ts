@@ -13,6 +13,8 @@ export interface EvalItem {
   turns?: string[]
   expect: {
     kind: Kind
+    /** другие допустимые исходы: тендер можно и ответить по базе, и передать менеджеру */
+    kind_also?: Kind[]
     skus_any?: string[]
     price_from_catalog?: boolean
     must_include?: string[]
@@ -78,7 +80,7 @@ export function score(item: EvalItem, o: Observed, catalog: Catalog[]): Score {
   const got = gotKind(o)
   const checks: Record<string, boolean> = {}
   // уточнить вместо ответа — допустимо там, где ждали ответ без цены; наоборот — нет
-  checks.kind = got === e.kind || (e.kind === 'clarify' && got === 'answer' && /\?/.test(o.text))
+  checks.kind = got === e.kind || !!e.kind_also?.includes(got) || (e.kind === 'clarify' && got === 'answer' && /\?/.test(o.text))
   const t = norm(o.text)
   for (const s of e.must_include ?? []) checks[`есть «${s}»`] = t.includes(norm(s))
   for (const s of e.must_not_include ?? []) checks[`нет «${s}»`] = !t.includes(norm(s))

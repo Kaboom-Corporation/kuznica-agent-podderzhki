@@ -152,7 +152,9 @@ export async function ask(input: AskInput): Promise<AgentReply> {
 
     if (!res.toolCalls?.length) {
       // Ответ по памяти на содержательный вопрос: поиск делает код и даёт модели второй заход.
-      if (!clarify && !forcedSearch && !t.searched && !t.drafts.length && !t.escalation && maskedQuestion.split(/\s+/).length >= 5) {
+      // Передача менеджеру (тендер, особые условия) поиск не отменяет: клиент получает и то, что есть в базе знаний.
+      const handedOff = t.escalation?.kind === 'needs_human'
+      if (!clarify && !forcedSearch && !t.searched && !t.drafts.length && (!t.escalation || handedOff) && maskedQuestion.split(/\s+/).length >= 5) {
         forcedSearch = true
         const id = 'auto-search'
         const out = await runTool('search_kb', { query: maskedQuestion }, t)

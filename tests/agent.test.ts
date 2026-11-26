@@ -68,5 +68,8 @@ describe('verify', () => {
     // обещания и вопросы — не ложный факт
     expect(checkActions('Подготовлю КП, как только уточните количество. Нужен ли счёт?', none)).toHaveLength(0)
     expect(checkActions('Подготовил черновик КП КП-104.', { ...none, proposal: true })).toHaveLength(0)
+    // «оформления», «созданию» — другое слово, не «оформлен» / «создан»
+    expect(checkActions('После оформления заказа вам будет выслан счет на оплату.', none)).toHaveLength(0)
+    expect(checkActions('Для создания КП уточните количество.', none)).toHaveLength(0)
   })
 })
