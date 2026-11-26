@@ -2,6 +2,7 @@
  * Загрузка демо-данных: каталог, правила цен, база знаний (куски + эмбеддинги).
  * Запуск: npm run ingest  (читает .env: NUXT_DATABASE_URL, NUXT_EMBED_*)
  * Повторный запуск перезаписывает всё — данные демо, не боевые.
+ * npm run ingest -- --kb  — только база знаний: каталог из фида магазина (ingest:feed) не трогаем.
  */
 import { readFileSync, readdirSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
@@ -11,7 +12,9 @@ import { embedTexts } from '../server/ported/rag/embeddings.ts'
 import { toCents } from '../server/ported/invoices/money.ts'
 
 if (existsSync('.env')) process.loadEnvFile('.env')
-const DATA = process.argv[2] || 'data'
+const args = process.argv.slice(2)
+const KB_ONLY = args.includes('--kb')
+const DATA = args.find(a => !a.startsWith('--')) || 'data'
 
 /** CSV с кавычками и запятыми внутри полей. */
 function parseCsv(text: string): Record<string, string>[] {
@@ -60,8 +63,8 @@ async function main() {
   try {
     await client.query('begin')
 
-    const catalog = parseCsv(readFileSync(join(DATA, 'catalog.csv'), 'utf8'))
-    await client.query('delete from catalog_items')
+    const catalog = KB_ONLY ? [] : parseCsv(readFileSync(join(DATA, 'catalog.csv'), 'utf8'))
+    if (!KB_ONLY) await client.query('delete from catalog_items')
     for (const r of catalog) {
       const cents = toCents(r.price_rub)
       if (cents == null) throw new Error(`цена не разобрана: ${r.sku} ${r.price_rub}`)
@@ -73,8 +76,8 @@ async function main() {
       )
     }
 
-    const rules = parseCsv(readFileSync(join(DATA, 'price_rules.csv'), 'utf8'))
-    await client.query('delete from price_rules')
+    const rules = KB_ONLY ? [] : parseCsv(readFileSync(join(DATA, 'price_rules.csv'), 'utf8'))
+    if (!KB_ONLY) await client.query('delete from price_rules')
     for (const r of rules) {
       await client.query(
         `insert into price_rules (code, title, applies_to, min_qty, discount_pct, requires, stackable, note) values ($1,$2,$3,$4,$5,$6,$7,$8)`,

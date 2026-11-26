@@ -11,3 +11,8 @@ storage/
 eval/results-*.json
 .DS_Store
 .gstack/
+# данные заказчика (фид магазина, выкачанные страницы) — не в git, грузятся скриптами
+data/feed/
+data/kb-softline/
+*.xml
+*.yml.gz
