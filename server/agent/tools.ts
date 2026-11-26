@@ -5,7 +5,7 @@
  */
 import { q, q1 } from '../lib/db'
 import { searchKb } from '../ported/rag/searcher'
-import { buildTsQueries, perSeat, seatCount, termMonths } from './catalog-search'
+import { buildTsQueries, perSeat, russianVendor, seatCount, termMonths } from './catalog-search'
 import { absorb, type Facts } from './verify'
 import { buildQuote, quoteForModel, rub, CONDITIONS, type CatalogItem, type Condition, type PriceRule } from './quote'
 
@@ -165,7 +165,8 @@ async function checkStock(query: string, question = '') {
       price: rub(BigInt(r.price_cents)),
       in_stock: r.stock < 0 ? 'доступно к заказу' : r.stock > 0 ? `${r.stock} шт.` : 'сейчас нет в наличии — срок и возможность поставки уточнит менеджер',
       lead: r.lead_days == null ? 'срок поставки в каталоге не указан — не называй его, предложи уточнить у менеджера' : `${r.lead_days} раб. дн.`,
-      in_registry: r.in_registry ? 'в реестре российского ПО' : 'нет в реестре',
+      in_registry: r.in_registry ? 'в реестре российского ПО' : 'нет отметки о реестре',
+      ...(russianVendor(r.vendor) ? { developer: 'российский разработчик' } : {}),
       // описание фида бывает в килобайт: восемь позиций съедают контекст малой модели
       description: r.description.length > 300 ? `${r.description.slice(0, 300)}…` : r.description,
       ...(r.url ? { url: r.url } : {}),

@@ -38,6 +38,15 @@ describe('verify', () => {
     expect(verifyAnswer('С вашим бюджетом до 400 тыс. руб. (а лучше не больше 1 500 000 ₽) подойдёт…', f).ok).toBe(true)
     expect(verifyAnswer('Выйдет 450 тыс. ₽.', f).ok).toBe(false)
   })
+  it('итог комплекта — сумма названных цен из каталога, не больше', () => {
+    const f = emptyFacts(today)
+    absorb(f, { items: [{ price: '80 818,40 ₽' }, { price: '61 830,00 ₽' }, { price: '135 765,00 ₽' }] })
+    expect(verifyAnswer('Dr.Web 80 818,40 ₽ + почта 61 830,00 ₽ = 142 648,40 ₽.', f).ok).toBe(true)
+    expect(verifyAnswer('Всё вместе 80 818,40 ₽ + 61 830,00 ₽ + 135 765,00 ₽ = 278 413,40 ₽.', f).ok).toBe(true)
+    // слагаемое не названо в ответе — итог не принимаем
+    expect(verifyAnswer('Комплект — 142 648,40 ₽.', f).ok).toBe(false)
+    expect(verifyAnswer('Dr.Web 80 818,40 ₽ + почта 61 830,00 ₽ = 142 650,00 ₽.', f).ok).toBe(false)
+  })
   it('пропускает цифры из инструментов и ловит выдуманные', () => {
     const f = emptyFacts(today)
     absorb(f, { total: '56 250,00 ₽', discount_pct: 25, lead_days: 10, valid_until: '2026-12-10' })

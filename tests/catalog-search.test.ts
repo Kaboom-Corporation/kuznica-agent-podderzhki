@@ -1,6 +1,20 @@
 import { describe, expect, it } from 'vitest'
-import { analogQuery, buildTsQueries, queryWords, seatCount, selectionQueries, termMonths } from '../server/agent/catalog-search'
+import { analogQuery, buildTsQueries, queryWords, russianVendor, seatCount, selectionQueries, termMonths } from '../server/agent/catalog-search'
 import { decode, parseOffer } from '../scripts/ingest-feed'
+
+describe('российский разработчик', () => {
+  it('Касперский и Dr.Web — российские, хотя отметки реестра в фиде нет', () => {
+    expect(russianVendor('Доктор Веб')).toBe(true)
+    expect(russianVendor('«Лаборатория Касперского»')).toBe(true)
+    expect(russianVendor('Группа Астра')).toBe(true)
+  })
+  it('иностранные и пустые — нет', () => {
+    expect(russianVendor('PRO32')).toBe(false)
+    expect(russianVendor('Zoho')).toBe(false)
+    expect(russianVendor('MDaemon')).toBe(false)
+    expect(russianVendor(null)).toBe(false)
+  })
+})
 
 describe('подбор «не знаю, что нужно»', () => {
   const first = 'не знаю что нам нужно, хочу защитить почту и файлы для 50 сотрудников'

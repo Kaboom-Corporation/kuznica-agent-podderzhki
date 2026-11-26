@@ -89,13 +89,24 @@ export async function ask(input: AskInput): Promise<AgentReply> {
   const system = systemPrompt(process.env.NUXT_PUBLIC_SHOP_NAME || 'Демо Софт')
   let steps = 0
   let forcedSearch = false
-  let forcedCatalog = false
   const earlierUser = history.flatMap((h, i) => h.role === 'user' ? [maskedParts[i] ?? h.content] : [])
   t.earlier = earlierUser
   let retriedVerify = false
   let retriedTimeout = false
   let final = ''
   let verdict: Verdict = { ok: true, checked: [], mismatches: [] }
+
+  // Российский аналог или подбор «не знаю, что нужно»: каталог открывает код ДО первого шага модели.
+  // Вдогонку (после ответа по памяти) малая модель путала варианты и выдумывала реестр — так она
+  // с первого шага видит позиции и цены из каталога.
+  const analog = analogQuery(maskedQuestion, earlierUser)
+  const prefetch = analog ? [analog] : selectionQueries(maskedQuestion, earlierUser)
+  if (prefetch.length) {
+    const calls = prefetch.map((query, i) => ({ id: `auto-catalog-${i}`, type: 'function' as const, function: { name: 'check_stock', arguments: JSON.stringify({ query }) } }))
+    msgs.push({ role: 'assistant', content: '', tool_calls: calls })
+    for (const [i, query] of prefetch.entries())
+      msgs.push({ role: 'tool', tool_call_id: calls[i]!.id, name: 'check_stock', content: toJson(await runTool('check_stock', { query }, t)) })
+  }
 
   while (steps < MAX_STEPS && usage.input < MAX_INPUT_TOKENS) {
     steps++
@@ -138,32 +149,6 @@ export async function ask(input: AskInput): Promise<AgentReply> {
     })
 
     if (!res.toolCalls?.length) {
-      // Просят российский аналог, а в каталог модель не заглянула — ищет код и даёт второй заход.
-      const analog = forcedCatalog || t.calls.some(c => c.name === 'check_stock') || t.drafts.length || t.escalation
-        ? null
-        : analogQuery(maskedQuestion, earlierUser)
-      if (analog) {
-        forcedCatalog = true
-        const id = 'auto-catalog'
-        const out = await runTool('check_stock', { query: analog }, t)
-        msgs.push(
-          { role: 'assistant', content: '', tool_calls: [{ id, type: 'function', function: { name: 'check_stock', arguments: JSON.stringify({ query: analog }) } }] },
-          { role: 'tool', tool_call_id: id, name: 'check_stock', content: toJson(out) },
-        )
-        continue
-      }
-      // Подбор «не знаю, что нужно»: варианты должны быть из каталога — открываем его сами.
-      const picks = forcedCatalog || t.calls.some(c => c.name === 'check_stock') || t.drafts.length || t.escalation
-        ? []
-        : selectionQueries(maskedQuestion, earlierUser)
-      if (picks.length) {
-        forcedCatalog = true
-        const calls = picks.map((query, i) => ({ id: `auto-pick-${i}`, type: 'function' as const, function: { name: 'check_stock', arguments: JSON.stringify({ query }) } }))
-        msgs.push({ role: 'assistant', content: '', tool_calls: calls })
-        for (const [i, query] of picks.entries())
-          msgs.push({ role: 'tool', tool_call_id: calls[i]!.id, name: 'check_stock', content: toJson(await runTool('check_stock', { query }, t)) })
-        continue
-      }
       // Ответ по памяти на содержательный вопрос: поиск делает код и даёт модели второй заход.
       if (!forcedSearch && !t.searched && !t.drafts.length && !t.escalation && maskedQuestion.split(/\s+/).length >= 5) {
         forcedSearch = true

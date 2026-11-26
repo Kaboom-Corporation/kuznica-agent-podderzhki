@@ -177,8 +177,14 @@ export function verifyAnswer(answer: string, facts: Facts): Verdict {
     if (!ok) { v.ok = false; v.mismatches.push({ kind, value }) }
   }
 
-  for (const m of answer.matchAll(MONEY_RE)) {
-    check('сумма', m[0].trim(), moneyKnown(facts, moneyCents(m), !!m[3]))
+  // Итог комплекта («Dr.Web + защита почты = 142 648,40 ₽») — точная сумма 2–3 цен из каталога,
+  // названных в этом же ответе. Неизвестная цена в слагаемых так не пройдёт: она сама не сверится.
+  const money = [...answer.matchAll(MONEY_RE)].map(m => ({ m, cents: moneyCents(m), known: moneyKnown(facts, moneyCents(m), !!m[3]) }))
+  const quoted = [...new Set(money.filter(x => x.known && !x.m[3]).map(x => x.cents))]
+  const isTotal = (cents: bigint) => quoted.some((a, i) => quoted.some((b, j) => j > i
+    && (a + b === cents || quoted.some((c, k) => k > j && a + b + c === cents))))
+  for (const { m, cents, known } of money) {
+    check('сумма', m[0].trim(), known || (!m[3] && isTotal(cents)))
     consume(m[0])
   }
   for (const m of [...rest.matchAll(PCT_RE)]) {
