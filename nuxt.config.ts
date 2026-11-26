@@ -20,7 +20,7 @@ export default defineNuxtConfig({
     },
   },
   runtimeConfig: {
-    databaseUrl: 'postgres://agent:agent@localhost:5433/agent',
+    databaseUrl: '',
     // Модель агента (OpenAI-совместимый шлюз: RouterAI / OpenRouter / Ollama).
     llmBaseUrl: 'https://routerai.ru/api/v1',
     llmApiKey: '',
@@ -48,7 +48,8 @@ export default defineNuxtConfig({
     sellerAccount: '40702810000000000000',
     sellerCorrAccount: '30101810000000000000',
     vatPercent: 22,
-    managerToken: 'demo',
+    // Пустой токен = панель менеджера закрыта (fail-closed). Задать NUXT_MANAGER_TOKEN.
+    managerToken: '',
     public: {
       shopName: 'Демо Софт — магазин лицензий',
     },

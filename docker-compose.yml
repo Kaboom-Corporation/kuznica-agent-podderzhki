@@ -3,10 +3,11 @@ services:
     image: pgvector/pgvector:pg17
     environment:
       POSTGRES_USER: agent
-      POSTGRES_PASSWORD: agent
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?задайте POSTGRES_PASSWORD в .env}
       POSTGRES_DB: agent
     ports:
-      - "5433:5432"
+      # только локально: наружу база не смотрит
+      - "127.0.0.1:5433:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./db/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
@@ -22,9 +23,9 @@ services:
         condition: service_healthy
     env_file: .env
     environment:
-      NUXT_DATABASE_URL: postgres://agent:agent@db:5432/agent
+      NUXT_DATABASE_URL: postgres://agent:${POSTGRES_PASSWORD}@db:5432/agent
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     restart: unless-stopped
 
 volumes:
