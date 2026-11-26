@@ -52,6 +52,8 @@ export interface PdfDocData {
   notes?: string
   /** Условия предложения (оплата, поставка, гарантии) — по строке на пункт. Только для КП. */
   terms?: string[]
+  /** Пометка-плашка под шапкой (например «Черновик — на проверку менеджеру»). У КП с пометкой нет подписи и М.П. */
+  draftMark?: string
 }
 
 const A4: [number, number] = [595.28, 841.89]
@@ -327,6 +329,12 @@ export async function generateInvoicePdf(d: PdfDocData): Promise<Uint8Array> {
 export async function generateProposalPdf(d: PdfDocData): Promise<Uint8Array> {
   const s = await newSheet()
   drawHeader(s, 'КП', 'Коммерческое предложение', d)
+  if (d.draftMark) {
+    s.rect(MARGIN, s.y - 18, s.contentWidth, 26, ORANGE_SOFT)
+    s.rect(MARGIN, s.y - 18, 3, 26, ORANGE)
+    s.text(d.draftMark, MARGIN + 12, s.y - 9, 10, s.bold, ORANGE)
+    s.y -= 40
+  }
   drawParties(s, d, 'Исполнитель', 'Заказчик')
   if (d.validUntil) {
     s.text(`Предложение действительно до ${formatDateRu(d.validUntil)}`, MARGIN, s.y, 10, s.bold, ORANGE)
@@ -355,6 +363,6 @@ export async function generateProposalPdf(d: PdfDocData): Promise<Uint8Array> {
     s.paragraph(d.notes, MARGIN, 9.5, s.contentWidth, INK)
     s.y -= 8
   }
-  drawSignature(s, d, 'Исполнитель')
+  if (!d.draftMark) drawSignature(s, d, 'Исполнитель')
   return await s.doc.save()
 }
