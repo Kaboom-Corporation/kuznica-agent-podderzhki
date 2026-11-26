@@ -200,6 +200,8 @@ export function createOpenAICompatProvider(cfg: { name: string, baseUrl: string,
         ...samplingFields(model, options?.temperature),
         ...thinkingFields(model, options?.noThinking),
       }
+      // Ollama: Qwen 3.x думает по умолчанию и тратит на это весь max_tokens (пустой ответ, finish_reason=length).
+      if (options?.noThinking && cfg.name === 'ollama') body.reasoning_effort = 'none'
       if (options?.tools?.length) {
         body.tools = options.tools
         body.tool_choice = options.toolChoice ?? 'auto'

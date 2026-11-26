@@ -9,7 +9,7 @@ export { EmbeddingUnavailableError } from './embedding-error'
 /** Размер пачки текстов в одном запросе. */
 const BATCH_SIZE = 32
 /** Таймаут одного HTTP-запроса: без него недоступная сеть вешает синхронный путь поиска и индексации. */
-const EMBED_HTTP_TIMEOUT_MS = 15_000
+const EMBED_HTTP_TIMEOUT_MS = Number(process.env.NUXT_EMBED_TIMEOUT_MS) || 15_000
 /**
  * Предохранитель по длине входа. Чанки из chunker.ts ≤ 2000 символов, поэтому срабатывать не должен: если сработал —
  * текст пришёл мимо нарезки, и молча терять хвост нельзя.
