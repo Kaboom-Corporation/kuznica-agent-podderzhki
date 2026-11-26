@@ -12,7 +12,7 @@ import { costRub } from '../ported/ai/pricing'
 import type { AIMessage } from '../ported/ai/provider'
 import { pickLlm, type Llm } from './llm'
 import { systemPrompt, systemTail } from './prompt'
-import { analogQuery, selectionQueries } from './catalog-search'
+import { analogQuery, clarifyFirst, selectionQueries } from './catalog-search'
 import { TOOL_DEFS, runTool, type Turn, type Source, type Draft, type Escalation } from './tools'
 import { absorbQuestion, checkActions, checkRegistry, describe, emptyFacts, verifyAnswer, type Verdict } from './verify'
 
@@ -99,6 +99,8 @@ export async function ask(input: AskInput): Promise<AgentReply> {
   // Российский аналог или подбор «не знаю, что нужно»: каталог открывает код ДО первого шага модели.
   // Вдогонку (после ответа по памяти) малая модель путала варианты и выдумывала реестр — так она
   // с первого шага видит позиции и цены из каталога.
+  // Первая реплика «не знаю, что нужно» без названного продукта — только уточнения, без инструментов.
+  const clarify = clarifyFirst(maskedQuestion, earlierUser)
   const analog = analogQuery(maskedQuestion, earlierUser)
   const prefetch = analog ? [analog] : selectionQueries(maskedQuestion, earlierUser)
   if (prefetch.length) {
@@ -114,9 +116,9 @@ export async function ask(input: AskInput): Promise<AgentReply> {
     try {
       res = await llm.provider.complete(msgs, {
         system,
-        systemTail: systemTail(today),
+        systemTail: systemTail(today) + (clarify ? ' Клиент не знает, что ему нужно: сейчас ответь только 2–3 короткими уточняющими вопросами, без товаров и цен.' : ''),
         cacheSystem: true,
-        tools: TOOL_DEFS as any,
+        ...(clarify ? {} : { tools: TOOL_DEFS as any }),
         gatewayModel: llm.model,
         model: llm.model,
         maxTokens: 1500,
@@ -150,7 +152,7 @@ export async function ask(input: AskInput): Promise<AgentReply> {
 
     if (!res.toolCalls?.length) {
       // Ответ по памяти на содержательный вопрос: поиск делает код и даёт модели второй заход.
-      if (!forcedSearch && !t.searched && !t.drafts.length && !t.escalation && maskedQuestion.split(/\s+/).length >= 5) {
+      if (!clarify && !forcedSearch && !t.searched && !t.drafts.length && !t.escalation && maskedQuestion.split(/\s+/).length >= 5) {
         forcedSearch = true
         const id = 'auto-search'
         const out = await runTool('search_kb', { query: maskedQuestion }, t)

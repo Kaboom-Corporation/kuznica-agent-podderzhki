@@ -119,7 +119,10 @@ export function absorb(facts: Facts, value: unknown): void {
 export function checkRegistry(answer: string, facts: Facts): Mismatch[] {
   const out: Mismatch[] = []
   for (const block of answer.split(/\n\s*\n/)) {
+    // оговорка «наличие в реестре уточнит менеджер» — не утверждение, что позиция в реестре
     const b = block.toLowerCase()
+      .replace(/(налич\p{L}*|есть\s+ли|входит\s+ли)\s+в\s+реестр\p{L}*(\s+[\p{L}«»]+){0,3}?\s+уточн\p{L}*/gu, ' ')
+      .replace(/уточн\p{L}*([\s,]+\p{L}+){0,3}?[\s,]+(налич\p{L}*|есть\s+ли|входит\s+ли)\s+в\s+реестр\p{L}*/gu, ' ')
     if (!/(?<!(нет|не)\s)в\s+реестр/.test(b)) continue
     for (const r of facts.registry) {
       if (r.inRegistry) continue

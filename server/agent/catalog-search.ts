@@ -145,6 +145,17 @@ export function selectionQueries(question: string, earlier: string[] = []): stri
   return []
 }
 
+// названный продукт: с ним «не знаю, что выбрать» — уже про редакции, и цены нужны сразу
+const NAMED_PRODUCT = /касперск|kaspersky|доктор|dr\.?\s?web|drweb|астр|astra|ред\s?ос|альт|eset|есет|windows|виндовс|office|офис|мойофис|acronis|киберпротект|рутокен|sl-\d/
+/**
+ * Первая реплика «не знаю, что нужно» без названного продукта: отвечать только уточнениями.
+ * Иначе малая модель сразу вываливает пол-каталога и путает цены между позициями.
+ */
+export function clarifyFirst(question: string, earlier: string[] = []): boolean {
+  const q = question.toLowerCase()
+  return !earlier.length && NEEDS_HELP.test(q) && !WANTS_ANALOG.test(q) && !NAMED_PRODUCT.test(q)
+}
+
 /** tsquery: «все слова» (and) — точнее; «любое слово» (or) — запасной, если по «все» пусто. */
 export function buildTsQueries(query: string): { all: string; any: string } | null {
   const words = queryWords(query)

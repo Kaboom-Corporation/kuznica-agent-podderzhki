@@ -1,6 +1,18 @@
 import { describe, expect, it } from 'vitest'
-import { analogQuery, buildTsQueries, queryWords, russianVendor, seatCount, selectionQueries, termMonths } from '../server/agent/catalog-search'
+import { analogQuery, buildTsQueries, clarifyFirst, queryWords, russianVendor, seatCount, selectionQueries, termMonths } from '../server/agent/catalog-search'
 import { decode, parseOffer } from '../scripts/ingest-feed'
+
+describe('первая реплика — только уточнения', () => {
+  it('«не знаю, что нужно» без названного продукта', () => {
+    expect(clarifyFirst('не знаю что нам нужно, хочу защитить почту и файлы для 50 сотрудников')).toBe(true)
+  })
+  it('названный продукт, просьба об аналоге или уже идущий разговор — нет', () => {
+    expect(clarifyFirst('не знаю, что выбрать в касперском для 5 пк')).toBe(false)
+    expect(clarifyFirst('не знаю, есть ли российский аналог windows')).toBe(false)
+    expect(clarifyFirst('не знаю что нужно', ['хочу защитить почту'])).toBe(false)
+    expect(clarifyFirst('сколько стоит kaspersky standard')).toBe(false)
+  })
+})
 
 describe('российский разработчик', () => {
   it('Касперский и Dr.Web — российские, хотя отметки реестра в фиде нет', () => {
