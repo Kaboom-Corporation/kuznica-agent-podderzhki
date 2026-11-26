@@ -36,12 +36,25 @@ CREATE TABLE IF NOT EXISTS catalog_items (
   term_months     int,                    -- срок лицензии/подписки; NULL = бессрочная
   price_cents     bigint NOT NULL,
   stock           int NOT NULL DEFAULT 0, -- доступно ключей/коробок; -1 = электронная поставка без ограничений
-  lead_days       int NOT NULL DEFAULT 0, -- срок поставки, раб. дней
+  lead_days       int,                    -- срок поставки, раб. дней; NULL = в фиде нет, уточняет менеджер
+  url             text,                   -- карточка товара в магазине
   in_registry     boolean NOT NULL DEFAULT false, -- в реестре российского ПО
   description     text NOT NULL DEFAULT '',
   search_text     text GENERATED ALWAYS AS (sku || ' ' || name || ' ' || vendor || ' ' || category || ' ' || description) STORED
 );
+-- базы, созданные до фида магазина
+ALTER TABLE catalog_items ADD COLUMN IF NOT EXISTS url text;
+ALTER TABLE catalog_items ALTER COLUMN lead_days DROP NOT NULL, ALTER COLUMN lead_days DROP DEFAULT;
 CREATE INDEX IF NOT EXISTS catalog_trgm ON catalog_items USING gin (search_text gin_trgm_ops);
+-- Полнотекст с весами: название важнее вендора, вендор — категории, категория — описания.
+-- 'russian' стеммит кириллицу и английские слова (english_stem для латиницы).
+ALTER TABLE catalog_items ADD COLUMN IF NOT EXISTS search_tsv tsvector GENERATED ALWAYS AS (
+  setweight(to_tsvector('russian', sku || ' ' || name), 'A') ||
+  setweight(to_tsvector('russian', vendor), 'B') ||
+  setweight(to_tsvector('russian', category), 'C') ||
+  setweight(to_tsvector('russian', description), 'D')
+) STORED;
+CREATE INDEX IF NOT EXISTS catalog_tsv ON catalog_items USING gin (search_tsv);
 
 -- Особые условия: скидки за объём, продление, партнёрам, госзаказчикам, отсрочка
 CREATE TABLE IF NOT EXISTS price_rules (

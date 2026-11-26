@@ -16,7 +16,8 @@ export interface CatalogItem {
   term_months: number | null
   price_cents: bigint
   stock: number
-  lead_days: number
+  lead_days: number | null
+  url?: string | null
   in_registry: boolean
   description: string
 }

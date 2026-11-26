@@ -10,6 +10,7 @@
     "build": "nuxt build",
     "start": "node .output/server/index.mjs",
     "ingest": "tsx scripts/ingest.ts",
+    "ingest:feed": "tsx scripts/ingest-feed.ts",
     "try": "tsx scripts/try-llm.ts",
     "eval": "tsx scripts/eval.ts",
     "test": "vitest run",
