@@ -8,12 +8,12 @@ describe('заказчик в КП', () => {
       .toEqual({ company: 'ООО Ромашка', inn: '', contact: 'Петров И.', email: '' })
   })
   it('настоящий ИНН остаётся, мусор с цифрами отбрасывается', () => {
-    expect(draftCustomer({ customer_inn: '7707 083893', customer_contact: 'Иван Петров' }).inn).toBe('7707083893')
+    expect(draftCustomer({ customer_inn: '7701 234567', customer_contact: 'Иван Петров' }).inn).toBe('7701234567')
     expect(draftCustomer({ customer_inn: '123' })).toMatchObject({ inn: '', contact: '' })
   })
 })
 
-// Стенд 27.11: draft_proposal ×5 с ошибкой — qwen передавал items строкой JSON, а не массивом.
+// Локальные модели иногда передают массив аргументов строкой JSON — принимаем и так.
 describe('позиции из аргументов модели', () => {
   it('массив как есть', () => {
     expect(parseItems([{ sku: 'SL-5320', qty: 1 }])).toEqual([{ sku: 'SL-5320', qty: 1 }])
