@@ -13,7 +13,7 @@ export interface ProposalRow {
   number: string
   conversation_id: string | null
   status: string
-  customer: { company?: string; inn?: string; email?: string }
+  customer: { company?: string; inn?: string; contact?: string; email?: string }
   items: Array<{ sku: string; name: string; unit: string; qty: number; unit_cents: string; discount_pct: number; sum_cents: string }>
   subtotal_cents: bigint
   discount_cents: bigint
@@ -66,7 +66,8 @@ export async function proposalPdf(p: ProposalRow): Promise<Uint8Array> {
     number: p.number,
     date: new Date(p.created_at).toISOString().slice(0, 10),
     seller: s,
-    buyer: { name: p.customer.company || 'Клиент', inn: p.customer.inn, email: p.customer.email },
+    // контакт — строкой под реквизитами (поле адреса в шаблоне PDF)
+    buyer: { name: p.customer.company || 'Клиент', inn: p.customer.inn, address: p.customer.contact ? `Контакт: ${p.customer.contact}` : undefined, email: p.customer.email },
     items,
     subtotalCents: p.subtotal_cents,
     discountCents: p.discount_cents,

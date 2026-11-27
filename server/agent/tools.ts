@@ -43,7 +43,8 @@ export const TOOL_DEFS = [
     items: itemsSchema(),
     conditions: conditionsSchema(),
     customer_company: { type: 'string' },
-    customer_inn: { type: 'string' },
+    customer_inn: { type: 'string', description: 'ИНН: 10 или 12 цифр. Нет ИНН — не передавай' },
+    customer_contact: { type: 'string', description: 'контактное лицо: фамилия и имя' },
     customer_email: { type: 'string' },
     notes: { type: 'string', description: 'что важно менеджеру: условия, сроки, пожелания клиента' },
   }, ['items']),
@@ -248,17 +249,28 @@ async function quote(args: Record<string, unknown>, t: Turn) {
   return { quote, wanted }
 }
 
+// Стенд 27.11, КП-101: модель положила «Петров И.» в customer_inn, в PDF вышло «ИНН Петров И.».
+// ИНН — только 10 или 12 цифр; иное в этом поле считаем контактным лицом.
+export function draftCustomer(args: Record<string, unknown>) {
+  const rawInn = str(args.customer_inn)
+  const innDigits = rawInn.replace(/\s/g, '')
+  const inn = /^\d{10}(\d{2})?$/.test(innDigits) ? innDigits : ''
+  const contact = str(args.customer_contact) || (inn || /\d/.test(rawInn) ? '' : rawInn)
+  return {
+    company: str(args.customer_company),
+    inn,
+    contact,
+    email: str(args.customer_email),
+  }
+}
+
 async function draftProposal(args: Record<string, unknown>, t: Turn) {
   const r = await quote(args, t)
   if ('error' in r) return r
   const { quote: qt, wanted } = r
   const shortage = wanted.filter(w => w.item.stock >= 0 && w.item.stock < w.qty)
   const validUntil = new Date(t.facts.today.getTime() + 14 * 86_400_000).toISOString().slice(0, 10)
-  const customer = {
-    company: str(args.customer_company),
-    inn: str(args.customer_inn),
-    email: str(args.customer_email),
-  }
+  const customer = draftCustomer(args)
   const notes = [str(args.notes), ...shortage.map(s => `${s.item.sku}: на складе ${s.item.stock} из ${s.qty}, срок поставки ${s.item.lead_days == null ? "уточнить" : `${s.item.lead_days} раб. дн.`}`)].filter(Boolean).join('\n')
   const row = await q1<{ id: string; number: string }>(
     `insert into proposals (number, conversation_id, customer, items, subtotal_cents, discount_cents, total_cents, vat_cents, notes, valid_until)

@@ -1,5 +1,17 @@
 import { describe, expect, it } from 'vitest'
-import { parseItems } from '../server/agent/tools'
+import { draftCustomer, parseItems } from '../server/agent/tools'
+
+// КП-101 на стенде: «ИНН Петров И.» в PDF
+describe('заказчик в КП', () => {
+  it('имя в поле ИНН уходит в контакт', () => {
+    expect(draftCustomer({ customer_company: 'ООО Ромашка', customer_inn: 'Петров И.' }))
+      .toEqual({ company: 'ООО Ромашка', inn: '', contact: 'Петров И.', email: '' })
+  })
+  it('настоящий ИНН остаётся, мусор с цифрами отбрасывается', () => {
+    expect(draftCustomer({ customer_inn: '7707 083893', customer_contact: 'Иван Петров' }).inn).toBe('7707083893')
+    expect(draftCustomer({ customer_inn: '123' })).toMatchObject({ inn: '', contact: '' })
+  })
+})
 
 // Стенд 27.11: draft_proposal ×5 с ошибкой — qwen передавал items строкой JSON, а не массивом.
 describe('позиции из аргументов модели', () => {
