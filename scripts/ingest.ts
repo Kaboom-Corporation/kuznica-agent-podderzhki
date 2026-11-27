@@ -89,7 +89,9 @@ async function main() {
     await client.query('delete from kb_documents')
     // --kb <папка>: папка с .md напрямую (например, data/kb-softline из scripts/fetch_kb.py)
     const kbDir = KB_ONLY && args.some(a => !a.startsWith('--')) ? DATA : join(DATA, 'kb')
-    const files = readdirSync(kbDir).filter(f => f.endsWith('.md')).sort()
+    // Контакты магазина не грузим: там настоящие телефоны и адреса заказчика. На такой вопрос агент передаёт менеджеру.
+    const SKIP = new Set(['kontakty.md'])
+    const files = readdirSync(kbDir).filter(f => f.endsWith('.md') && !SKIP.has(f)).sort()
     const pending: { id: number; heading: string | null; content: string; title: string }[] = []
     for (const f of files) {
       const { meta, body: raw } = frontMatter(readFileSync(join(kbDir, f), 'utf8'))
