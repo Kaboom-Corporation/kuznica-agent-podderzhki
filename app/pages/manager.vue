@@ -95,11 +95,14 @@ async function loadRows() {
 }
 
 async function open(id: string) {
+  const other = selected.value !== id
   selected.value = id
   notice.value = ''
   card.value = await api<Card>(`/api/manager/conversations/${id}`)
   email.value = card.value.conversation?.customer_email || ''
   proposalNote.value = ''
+  // Рабочая область листается сама по себе: другое обращение открываем с начала
+  if (other) nextTick(() => document.querySelector('.inbox > .workspace')?.scrollTo({ top: 0 }))
 }
 
 async function loadStats() {
@@ -1429,6 +1432,16 @@ onBeforeUnmount(() => {
 .kb-grow { flex: 1; min-height: 0; }
 .kb-ta { flex: 1; min-height: 200px; resize: none; font: 13px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; padding: 10px; }
 .kb-foot { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-top: 1px solid var(--line); }
+
+/* Широкий экран: страница не листается, список и рабочая область листаются каждая внутри себя,
+   шапки колонок остаются на месте */
+@media (min-width: 961px) {
+  .mgr-page:has(.inbox) { height: 100dvh; overflow: hidden; }
+  .inbox { flex: 1 1 auto; min-height: 0; height: calc(100dvh - 48px); overflow: hidden; }
+  .inbox-list, .inbox > .workspace, .inbox > .ws-empty { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+  .inbox-bar { position: sticky; top: 0; z-index: 2; flex-shrink: 0; background: var(--bg-chrome); }
+  .ws-bar { position: sticky; top: 0; z-index: 2; flex-shrink: 0; background: var(--bg); }
+}
 
 @media (max-width: 960px) {
   .inbox { grid-template-columns: minmax(0, 1fr); }
