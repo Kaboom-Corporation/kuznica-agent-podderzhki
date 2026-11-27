@@ -86,8 +86,9 @@ async function main() {
       )
     }
 
-    // Ответы менеджера (обучение агента, server/lib/learn.ts) при перезаливке базы знаний не трогаем
-    await client.query(`delete from kb_documents where source not like 'manager:%'`)
+    // Ответы менеджера (server/lib/learn.ts) и статьи, созданные или исправленные в панели (server/lib/kb-edit.ts),
+    // при перезаливке базы знаний не трогаем: правка менеджера главнее исходника
+    await client.query(`delete from kb_documents where source not like 'manager:%' and source not like 'panel:%'`)
     // --kb <папка>: папка с .md напрямую (например, data/kb-softline из scripts/fetch_kb.py)
     const kbDir = KB_ONLY && args.some(a => !a.startsWith('--')) ? DATA : join(DATA, 'kb')
     // Контакты магазина не грузим: там настоящие телефоны и адреса заказчика. На такой вопрос агент передаёт менеджеру.
@@ -100,9 +101,11 @@ async function main() {
       const slug = meta.slug || f.replace(/\.md$/, '')
       const title = debrand(meta.title || slug, { title: true })
       const doc = await client.query<{ id: number }>(
-        `insert into kb_documents (slug, title, source, valid_from, valid_to) values ($1,$2,$3,$4,$5) returning id`,
+        `insert into kb_documents (slug, title, source, valid_from, valid_to) values ($1,$2,$3,$4,$5)
+         on conflict (slug) do nothing returning id`,
         [slug, title, meta.source || join(kbDir, f), nullable(meta.valid_from), nullable(meta.valid_to)],
       )
+      if (!doc.rows.length) continue // статью уже исправили в панели — оставляем правку
       chunkMarkdown(body).forEach((c, idx) => pending.push({ id: doc.rows[0]!.id, heading: c.heading, content: c.content, title, ...{ idx } } as any))
     }
 

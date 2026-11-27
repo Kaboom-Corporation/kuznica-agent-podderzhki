@@ -106,6 +106,8 @@ async function loadStats() {
   stats.value = await api<Stats>(`/api/manager/stats?days=${days.value}`)
 }
 
+let kbLoaded = false
+
 async function refresh() {
   if (!token.value) return
   try {
@@ -114,6 +116,8 @@ async function refresh() {
       if (selected.value) await open(selected.value)
     } else {
       await loadStats()
+      // Список статей — при первом заходе на вкладку и после правок, не каждые 10 секунд
+      if (!kbLoaded) { await loadKb(); kbLoaded = true }
     }
   } catch {}
 }
@@ -168,7 +172,7 @@ async function forget(slug: string) {
   forgetting.value = slug
   try {
     await api(`/api/manager/learned/${slug}`, { method: 'DELETE' })
-    await loadStats()
+    await Promise.all([loadStats(), loadKb()])
   } catch {}
   finally { forgetting.value = '' }
 }
@@ -201,6 +205,73 @@ async function showPdf(p: Proposal) {
 
 function onDialogBackdropClick(e: MouseEvent) {
   if (e.target === pdfDialog.value) pdfDialog.value?.close()
+}
+
+// База знаний: список статей и правка в окне. Сохранение режет текст на куски и пересчитывает поиск.
+interface KbItem { id: number; slug: string; title: string; kind: 'store' | 'panel' | 'learned'; chunks: number; updated_at: string }
+const KB_KIND: Record<KbItem['kind'], string> = { store: 'база магазина', panel: 'правка менеджера', learned: 'из ответа менеджера' }
+const kb = ref<KbItem[]>([])
+const kbQuery = ref('')
+const kbDialog = ref<HTMLDialogElement | null>(null)
+const kbEdit = ref<{ id: number | null; title: string; content: string; kind: KbItem['kind'] | null }>({ id: null, title: '', content: '', kind: null })
+const kbBusy = ref(false)
+const kbNotice = ref('')
+const kbFiltered = computed(() => {
+  const s = kbQuery.value.trim().toLowerCase()
+  return s ? kb.value.filter(d => d.title.toLowerCase().includes(s)) : kb.value
+})
+
+async function loadKb() {
+  kb.value = await api<KbItem[]>('/api/manager/kb')
+}
+
+async function editKb(id: number | null) {
+  kbNotice.value = ''
+  if (id == null) kbEdit.value = { id: null, title: '', content: '', kind: null }
+  else {
+    const d = await api<{ id: number; title: string; content: string; kind: KbItem['kind'] }>(`/api/manager/kb/${id}`)
+    kbEdit.value = { id: d.id, title: d.title, content: d.content, kind: d.kind }
+  }
+  kbDialog.value?.showModal()
+}
+
+async function saveKbDoc() {
+  kbBusy.value = true
+  kbNotice.value = ''
+  try {
+    const { id, title, content } = kbEdit.value
+    const r = await api<{ id: number; chunks: number }>(id == null ? '/api/manager/kb' : `/api/manager/kb/${id}`, {
+      method: id == null ? 'POST' : 'PUT',
+      body: { title, content },
+    })
+    kbDialog.value?.close()
+    kbNotice.value = `Сохранено: ${r.chunks} ${r.chunks === 1 ? 'фрагмент' : 'фрагмента(ов)'} в поиске. Агент учтёт со следующего вопроса.`
+    await Promise.all([loadKb(), loadStats()])
+  }
+  catch (e: any) {
+    kbNotice.value = e?.data?.statusMessage || e?.statusMessage || 'Не сохранилось'
+  }
+  finally { kbBusy.value = false }
+}
+
+async function deleteKbDoc() {
+  const { id, kind } = kbEdit.value
+  if (id == null) return
+  kbBusy.value = true
+  try {
+    await api(`/api/manager/kb/${id}`, { method: 'DELETE' })
+    kbDialog.value?.close()
+    kbNotice.value = kind === 'store' ? 'Статья удалена. Вернётся при следующей загрузке базы магазина.' : 'Статья удалена'
+    await Promise.all([loadKb(), loadStats()])
+  }
+  catch (e: any) {
+    kbNotice.value = e?.data?.statusMessage || 'Не удалилось'
+  }
+  finally { kbBusy.value = false }
+}
+
+function onKbBackdropClick(e: MouseEvent) {
+  if (e.target === kbDialog.value && !kbBusy.value) kbDialog.value?.close()
 }
 
 const rowDot = (r: Row) => r.open_escalations ? 'bad' : r.draft_proposals ? 'warn' : r.status === 'open' ? 'ok' : ''
@@ -609,6 +680,30 @@ onBeforeUnmount(() => {
       </section>
 
       <section class="stats-sec">
+        <div class="kb-head">
+          <h2 class="sec-h">База знаний · {{ kb.length }}</h2>
+          <div class="kb-tools">
+            <input v-model="kbQuery" class="field kb-search" type="search" placeholder="Найти статью" aria-label="Найти статью">
+            <button class="btn sm" @click="editKb(null)">Новая статья</button>
+          </div>
+        </div>
+        <p v-if="kbNotice" class="kb-notice" role="status">{{ kbNotice }}</p>
+        <ul class="line-list kb-list">
+          <li v-for="d in kbFiltered" :key="d.id" class="line-row">
+            <div class="line-left">
+              <span class="status-dot" :class="{ ok: d.kind !== 'store' }" aria-hidden="true" />
+              <span>{{ d.title }}</span>
+            </div>
+            <div class="line-right">
+              <span class="muted" style="font-size:12px">{{ KB_KIND[d.kind] }} · {{ d.chunks }} фр.</span>
+              <button class="btn ghost sm" @click="editKb(d.id)">Изменить</button>
+            </div>
+          </li>
+          <li v-if="!kbFiltered.length" class="muted" style="font-size:13px;padding:8px 0">Ничего не нашлось</li>
+        </ul>
+      </section>
+
+      <section class="stats-sec">
         <h2 class="sec-h">Открытые эскалации и пробелы БЗ</h2>
         <p v-if="!stats.gaps.length" class="muted" style="font-size:13px">Нет открытых эскалаций</p>
         <ul v-else class="line-list">
@@ -630,6 +725,32 @@ onBeforeUnmount(() => {
         <button class="btn ghost sm" @click="pdfDialog?.close()">Закрыть</button>
       </div>
       <iframe v-if="pdfUrl" :src="pdfUrl" title="PDF КП" />
+    </dialog>
+
+    <dialog ref="kbDialog" class="pdf-dialog kb-dialog" aria-label="Статья базы знаний" @click="onKbBackdropClick">
+      <form class="kb-form" @submit.prevent="saveKbDoc">
+        <div class="pdf-head">
+          <span style="font-size:13px;font-weight:600">{{ kbEdit.id == null ? 'Новая статья' : 'Правка статьи' }}</span>
+          <button type="button" class="btn ghost sm" :disabled="kbBusy" @click="kbDialog?.close()">Закрыть</button>
+        </div>
+        <div class="kb-body">
+          <label class="kb-label">Заголовок
+            <input v-model="kbEdit.title" class="field" maxlength="200" required>
+          </label>
+          <label class="kb-label kb-grow">Текст · разделы с «## », агент находит ответ по разделу
+            <textarea v-model="kbEdit.content" class="field kb-ta" maxlength="40000" required spellcheck="true" />
+          </label>
+          <p v-if="kbEdit.kind === 'store'" class="muted" style="font-size:12px;margin:0">
+            Статья из базы магазина. После правки перезагрузка базы её не затрёт.
+          </p>
+          <p v-if="kbNotice && kbDialog?.open" class="kb-notice" role="alert">{{ kbNotice }}</p>
+        </div>
+        <div class="kb-foot">
+          <button v-if="kbEdit.id != null" type="button" class="btn ghost sm kb-del" :disabled="kbBusy" @click="deleteKbDoc">Удалить</button>
+          <span class="muted" style="font-size:12px;margin-left:auto">{{ kbEdit.content.length.toLocaleString('ru-RU') }} зн.</span>
+          <button type="submit" class="btn dark" :disabled="kbBusy">{{ kbBusy ? 'Сохраняю…' : 'Сохранить' }}</button>
+        </div>
+      </form>
     </dialog>
   </div>
 </template>
@@ -1292,6 +1413,23 @@ onBeforeUnmount(() => {
   width: 100%;
 }
 
+/* База знаний */
+.kb-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
+.kb-head .sec-h { margin: 0; }
+.kb-tools { display: flex; gap: 8px; align-items: center; }
+.kb-search { width: 220px; }
+.kb-list { max-height: 420px; overflow-y: auto; }
+.kb-list .line-left span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kb-notice { font-size: 13px; margin: 6px 0; color: var(--ink-2); }
+.kb-dialog { width: min(760px, 95vw); }
+.kb-form { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.kb-body { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 12px; padding: 14px; }
+.kb-label { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--ink-3); }
+.kb-label .field { width: 100%; color: var(--ink); }
+.kb-grow { flex: 1; min-height: 0; }
+.kb-ta { flex: 1; min-height: 200px; resize: none; font: 13px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; padding: 10px; }
+.kb-foot { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-top: 1px solid var(--line); }
+
 @media (max-width: 960px) {
   .inbox { grid-template-columns: minmax(0, 1fr); }
   .inbox-list { border-right: 0; border-bottom: 1px solid var(--line); }
@@ -1310,5 +1448,9 @@ onBeforeUnmount(() => {
   .view-tab { padding: 0 6px; }
   .topbar-right { gap: 2px; }
   .topbar-right .btn { padding-left: 6px; padding-right: 6px; }
+  .kb-tools { width: 100%; }
+  .kb-search { flex: 1; width: auto; min-width: 0; }
+  .kb-list .line-right .muted { display: none; }
+  .kb-dialog { width: 100vw; max-width: 100vw; height: 100dvh; max-height: 100dvh; border-radius: 0; margin: 0; }
 }
 </style>
