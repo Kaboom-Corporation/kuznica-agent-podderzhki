@@ -7,7 +7,7 @@ interface Proposal { id: string; number: string; status: string; customer: any; 
 interface Escalation { id: number; kind: string; question: string; reason: string; resolved: boolean; created_at: string }
 interface Run { id: number; model: string; steps: number; input_tokens: number; output_tokens: number; cost_rub: string; duration_ms: number; tools: any; escalated: boolean; verify_issues: any[]; created_at: string }
 interface Card { conversation: any; messages: { id: number; role: string; content: string; created_at: string }[]; proposals: Proposal[]; invoices: any[]; escalations: Escalation[]; runs: Run[] }
-interface Stats { days: number; totals: { conversations: number; runs: number; escalated_runs: number; cost_rub: string; avg_cost_rub: string; median_ms: number; verify_issues: number }; byModel: { model: string; runs: number; cost_rub: string }[]; proposals: { status: string; n: number; total_cents: string }[]; gaps: (Escalation & { conversation_id: string })[] }
+interface Stats { days: number; totals: { conversations: number; runs: number; escalated_runs: number; cost_rub: string; avg_cost_rub: string; median_ms: number; verify_issues: number }; byModel: { model: string; runs: number; cost_rub: string }[]; proposals: { status: string; n: number; total_cents: string }[]; gaps: (Escalation & { conversation_id: string })[]; learned?: { slug: string; title: string; updated_at: string }[] }
 
 const TOKEN_KEY = 'manager-token'
 const token = ref('')
@@ -107,10 +107,11 @@ const resolve = (e: Escalation) => act(async () => {
   await api(`/api/manager/escalations/${e.id}/resolve`, { method: 'POST' })
   return 'Эскалация закрыта'
 })
+const remember = ref(true)
 const sendReply = () => act(async () => {
-  await api(`/api/manager/conversations/${selected.value}/reply`, { method: 'POST', body: { text: reply.value } })
+  const r = await api<{ learned: { title: string } | null }>(`/api/manager/conversations/${selected.value}/reply`, { method: 'POST', body: { text: reply.value, remember: remember.value } })
   reply.value = ''
-  return 'Ответ отправлен в чат клиента'
+  return r.learned ? 'Ответ отправлен клиенту и сохранён в базу знаний: на такой вопрос агент дальше ответит сам' : 'Ответ отправлен в чат клиента'
 })
 
 /** PDF закрыт токеном: iframe заголовок не передаст, поэтому забираем файлом и показываем по blob-ссылке. */
@@ -245,7 +246,10 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); if (pdfUrl.value) URL.r
 
         <form class="reply" @submit.prevent="sendReply">
           <textarea v-model="reply" class="field" rows="3" maxlength="4000" placeholder="Ответ клиенту — появится в его чате" aria-label="Ответ клиенту" />
-          <button class="btn primary" :disabled="busy || !reply.trim()">Ответить клиенту</button>
+          <div class="replybar">
+            <label class="small check"><input v-model="remember" type="checkbox"> Запомнить ответ: агент сам ответит следующему клиенту</label>
+            <button class="btn primary" :disabled="busy || !reply.trim()">Ответить клиенту</button>
+          </div>
         </form>
 
         <details class="runs">
@@ -299,6 +303,16 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); if (pdfUrl.value) URL.r
             <span class="small">{{ m.model }}</span>
             <span class="num small">{{ m.runs }} · {{ fmtRub(m.cost_rub) }}</span>
           </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h3>Агент научился на ответах менеджера</h3>
+        <p v-if="!stats.learned?.length" class="muted small">Пока нет. Отметка «Запомнить ответ» под ответом клиенту добавляет его сюда</p>
+        <div v-for="l in stats.learned" :key="l.slug" class="gap">
+          <span class="chip ok">в базе знаний</span>
+          <span class="small q">{{ l.title.replace(/^Ответ менеджера: /, '') }}</span>
+          <span class="muted tiny num">{{ time(l.updated_at) }}</span>
         </div>
       </div>
 
@@ -361,6 +375,8 @@ tfoot td { border-bottom: 0; }
 .msg.user { background: var(--accent-soft); }
 .msg.manager { background: var(--ok-soft); }
 .reply { display: flex; flex-direction: column; gap: 8px; align-items: flex-end; }
+.replybar { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: flex-end; width: 100%; }
+.check { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
 .runs summary { cursor: pointer; color: var(--muted); font-size: 13px; }
 .stats { display: flex; flex-direction: column; gap: 16px; }
 .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; }

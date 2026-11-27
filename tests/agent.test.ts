@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildQuote, rub, vatInside, type CatalogItem, type PriceRule } from '../server/agent/quote'
+import { buildQuote, GOODWILL_RULE, rub, vatInside, type CatalogItem, type PriceRule } from '../server/agent/quote'
 import { absorb, absorbQuestion, checkActions, emptyFacts, verifyAnswer } from '../server/agent/verify'
 
 const item = (sku: string, price: bigint, extra: Partial<CatalogItem> = {}): CatalogItem => ({
@@ -23,6 +23,18 @@ describe('quote', () => {
     const q = buildQuote([{ item: item('AV-1', 100000n), qty: 1 }], [rule('gov', 7, { requires: 'gov' })], new Set(), 22)
     expect(q.lines[0]!.discount_pct).toBe(0)
     expect(q.possible.map(p => p.code)).toEqual(['gov'])
+  })
+  // заказчик, чат 27.11: до 5% агент даёт сам по просьбе клиента, без купона
+  it('скидка 5% по просьбе: только с asked_discount, не суммируется, не подсказывается', () => {
+    const vol = rule('vol10', 3, { min_qty: 10 })
+    const asked = buildQuote([{ item: item('AV-1', 100000n), qty: 10 }], [vol, GOODWILL_RULE], new Set(['asked_discount']), 22)
+    expect(asked.lines[0]!.discount_pct).toBe(5)
+    expect(asked.lines[0]!.rules).toEqual(['GOODWILL5'])
+    const silent = buildQuote([{ item: item('AV-1', 100000n), qty: 10 }], [vol, GOODWILL_RULE], new Set(), 22)
+    expect(silent.lines[0]!.discount_pct).toBe(3)
+    expect(silent.possible).toEqual([])
+    const bigger = buildQuote([{ item: item('AV-1', 100000n), qty: 50 }], [rule('vol50', 10, { min_qty: 50 }), GOODWILL_RULE], new Set(['asked_discount']), 22)
+    expect(bigger.lines[0]!.discount_pct).toBe(10)
   })
   it('НДС внутри цены и формат рублей', () => {
     expect(vatInside(12_200n, 22)).toBe(2_200n)

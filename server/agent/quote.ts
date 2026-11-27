@@ -4,8 +4,8 @@
  * Деньги в копейках (bigint), проценты целые.
  */
 
-export type Condition = 'renewal' | 'partner' | 'gov' | 'edu'
-export const CONDITIONS: Condition[] = ['renewal', 'partner', 'gov', 'edu']
+export type Condition = 'renewal' | 'partner' | 'gov' | 'edu' | 'asked_discount'
+export const CONDITIONS: Condition[] = ['renewal', 'partner', 'gov', 'edu', 'asked_discount']
 
 export interface CatalogItem {
   sku: string
@@ -60,6 +60,22 @@ export interface Quote {
 /** Потолок суммарной скидки на строку, чтобы сложение правил не ушло в ноль. */
 export const MAX_DISCOUNT_PCT = 40
 
+/**
+ * Скидку до 5% агент может дать сам, если клиент попросил, а купона или особых условий нет
+ * (заказчик, чат задачи 27.11). Несуммируемая: с другой несуммируемой скидкой берётся большая.
+ * В «possible» не попадает, чтобы агент не предлагал её каждому без просьбы.
+ */
+export const GOODWILL_RULE: PriceRule = {
+  code: 'GOODWILL5',
+  title: 'Скидка по просьбе клиента',
+  applies_to: '*',
+  min_qty: 1,
+  discount_pct: 5,
+  requires: 'asked_discount',
+  stackable: false,
+  note: 'агент даёт сам; больше 5% — только менеджер',
+}
+
 export function ruleMatches(rule: PriceRule, item: CatalogItem): boolean {
   const a = rule.applies_to.trim()
   if (a === '*') return true
@@ -75,7 +91,7 @@ export function ruleMatches(rule: PriceRule, item: CatalogItem): boolean {
 export function lineDiscount(item: CatalogItem, qty: number, rules: PriceRule[], conditions: Set<Condition>) {
   const fit = rules.filter(r => ruleMatches(r, item) && qty >= r.min_qty && r.discount_pct > 0)
   const active = fit.filter(r => !r.requires || conditions.has(r.requires))
-  const possible = fit.filter(r => r.requires && !conditions.has(r.requires))
+  const possible = fit.filter(r => r.requires && !conditions.has(r.requires) && r.code !== GOODWILL_RULE.code)
   const single = active.filter(r => !r.stackable).sort((a, b) => b.discount_pct - a.discount_pct)[0]
   const stack = active.filter(r => r.stackable)
   const applied = [...(single ? [single] : []), ...stack]
@@ -175,5 +191,6 @@ export function conditionHint(c: Condition): string {
     partner: 'партнёрская скидка — только для зарегистрированных партнёров, подтверждает менеджер',
     gov: 'условия для госзаказчика — нужен ИНН организации и закон (44-ФЗ/223-ФЗ)',
     edu: 'скидка для образования — нужна лицензия на образовательную деятельность',
+    asked_discount: 'скидка 5% по просьбе клиента; больше — только через менеджера',
   }[c]
 }

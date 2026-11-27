@@ -16,13 +16,14 @@ export default defineEventHandler(async (event) => {
        from agent_runs where created_at > now() - make_interval(days => $1)`,
     [days],
   )
-  const [byModel, proposals, gaps] = await Promise.all([
+  const [byModel, proposals, gaps, learned] = await Promise.all([
     q(`select model, count(*)::int as runs, sum(cost_rub)::text as cost_rub from agent_runs
         where created_at > now() - make_interval(days => $1) group by model order by runs desc`, [days]),
     q(`select status, count(*)::int as n, sum(total_cents)::text as total_cents from proposals
         where created_at > now() - make_interval(days => $1) group by status`, [days]),
     q(`select id, conversation_id, kind, question, reason, created_at from escalations
         where not resolved order by id desc limit 50`),
+    q(`select slug, title, updated_at from kb_documents where source like 'manager:%' order by id desc limit 30`),
   ])
-  return { days, totals, byModel, proposals, gaps }
+  return { days, totals, byModel, proposals, gaps, learned }
 })

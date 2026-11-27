@@ -7,7 +7,7 @@ import { q, q1 } from '../lib/db'
 import { searchKb } from '../ported/rag/searcher'
 import { buildTsQueries, perSeat, russianVendor, seatCount, termMonths } from './catalog-search'
 import { absorb, type Facts } from './verify'
-import { buildQuote, quoteForModel, rub, CONDITIONS, type CatalogItem, type Condition, type PriceRule } from './quote'
+import { buildQuote, quoteForModel, rub, CONDITIONS, GOODWILL_RULE, type CatalogItem, type Condition, type PriceRule } from './quote'
 
 export interface Source { slug: string; title: string; heading: string | null; expired: boolean }
 export interface Draft { kind: 'proposal' | 'invoice'; id: string; number: string; total: string }
@@ -44,6 +44,7 @@ export const TOOL_DEFS = [
     conditions: conditionsSchema(),
     customer_company: { type: 'string' },
     customer_inn: { type: 'string', description: 'ИНН: 10 или 12 цифр. Нет ИНН — не передавай' },
+    customer_kpp: { type: 'string', description: 'КПП: 9 знаков. Нет — не передавай' },
     customer_contact: { type: 'string', description: 'контактное лицо: фамилия и имя' },
     customer_email: { type: 'string' },
     notes: { type: 'string', description: 'что важно менеджеру: условия, сроки, пожелания клиента' },
@@ -67,7 +68,7 @@ function itemsSchema() {
   }
 }
 function conditionsSchema() {
-  return { type: 'array', items: { type: 'string', enum: CONDITIONS }, description: 'renewal — продление, partner — партнёр, gov — госзаказчик, edu — образование' }
+  return { type: 'array', items: { type: 'string', enum: CONDITIONS }, description: 'renewal — продление, partner — партнёр, gov — госзаказчик, edu — образование, asked_discount — клиент сам попросил скидку (5%)' }
 }
 
 export async function runTool(name: string, args: Record<string, unknown>, t: Turn): Promise<unknown> {
@@ -167,7 +168,8 @@ async function checkStock(query: string, question = '') {
       unit: r.unit,
       term: r.term_months ? `${r.term_months} мес.` : 'бессрочная',
       price: rub(BigInt(r.price_cents)),
-      in_stock: r.stock < 0 ? 'доступно к заказу' : r.stock > 0 ? `${r.stock} шт.` : 'сейчас нет в наличии — срок и возможность поставки уточнит менеджер',
+      // нет в наличии: цену называть и КП/счёт готовить можно, менеджер подтверждает только поставку (заказчик, 27.11)
+      in_stock: r.stock < 0 ? 'доступно к заказу' : r.stock > 0 ? `${r.stock} шт.` : 'сейчас нет в наличии — цену назвать и КП подготовить можно, поставку подтвердит менеджер',
       lead: r.lead_days == null ? 'срок поставки в каталоге не указан — не называй его, предложи уточнить у менеджера' : `${r.lead_days} раб. дн.`,
       in_registry: r.in_registry ? 'в реестре российского ПО' : 'нет отметки о реестре',
       ...(russianVendor(r.vendor) ? { developer: 'российский разработчик' } : {}),
@@ -244,7 +246,7 @@ async function quote(args: Record<string, unknown>, t: Turn) {
   if (lone.length) {
     return { error: `${lone.map(w => w.item.sku).join(', ')}: цена за одно место, а клиенту нужно ${seats}. Передай qty ${seats} для этих позиций (qty_for_order из check_stock).` }
   }
-  const rules = await q<PriceRule>('select * from price_rules')
+  const rules = [...await q<PriceRule>('select * from price_rules'), GOODWILL_RULE]
   const quote = buildQuote(wanted, rules, parseConditions(args.conditions), t.vatPercent)
   return { quote, wanted }
 }
@@ -256,9 +258,13 @@ export function draftCustomer(args: Record<string, unknown>) {
   const innDigits = rawInn.replace(/\s/g, '')
   const inn = /^\d{10}(\d{2})?$/.test(innDigits) ? innDigits : ''
   const contact = str(args.customer_contact) || (inn || /\d/.test(rawInn) ? '' : rawInn)
+  // КПП: 4 цифры, 2 знака (цифры или латиница), 3 цифры
+  const rawKpp = str(args.customer_kpp).replace(/\s/g, '').toUpperCase()
+  const kpp = /^\d{4}[\dA-Z]{2}\d{3}$/.test(rawKpp) ? rawKpp : ''
   return {
     company: str(args.customer_company),
     inn,
+    kpp,
     contact,
     email: str(args.customer_email),
   }

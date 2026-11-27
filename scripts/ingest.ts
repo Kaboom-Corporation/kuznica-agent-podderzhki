@@ -86,7 +86,8 @@ async function main() {
       )
     }
 
-    await client.query('delete from kb_documents')
+    // Ответы менеджера (обучение агента, server/lib/learn.ts) при перезаливке базы знаний не трогаем
+    await client.query(`delete from kb_documents where source not like 'manager:%'`)
     // --kb <папка>: папка с .md напрямую (например, data/kb-softline из scripts/fetch_kb.py)
     const kbDir = KB_ONLY && args.some(a => !a.startsWith('--')) ? DATA : join(DATA, 'kb')
     // Контакты магазина не грузим: там настоящие телефоны и адреса заказчика. На такой вопрос агент передаёт менеджеру.
