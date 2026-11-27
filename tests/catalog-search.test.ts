@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { analogQuery, buildTsQueries, clarifyFirst, queryWords, russianVendor, seatCount, selectionQueries, termMonths } from '../server/agent/catalog-search'
+import { analogQuery, buildTsQueries, clarifyFirst, lotFits, lotText, orderLot, queryWords, russianVendor, seatCount, selectionQueries, termMonths, withoutLot } from '../server/agent/catalog-search'
 import { decode, parseOffer } from '../server/lib/feed'
 
 describe('первая реплика — только уточнения', () => {
@@ -122,5 +122,34 @@ describe('фид YML', () => {
   })
   it('сущности XML', () => {
     expect(decode('A &amp; B &#8212; &#x41;')).toBe('A & B — A')
+  })
+  it('партия из sales_notes — первой в описании', () => {
+    const band = parseOffer(offer.replace('<categoryId>', '<sales_notes>Кол-во от 50 до 99 шт. </sales_notes><categoryId>'), () => '')!
+    expect(band.description.startsWith('Кол-во в заказе: от 50 до 99 • ')).toBe(true)
+    expect(orderLot(band.description)).toEqual({ min: 50, max: 99 })
+    const open = parseOffer(offer.replace('<categoryId>', '<sales_notes>Кол-во от 150 шт.</sales_notes><categoryId>'), () => '')!
+    expect(orderLot(open.description)).toEqual({ min: 150, max: null })
+    expect(orderLot(parseOffer(offer, () => '')!.description)).toBeNull()
+  })
+})
+
+describe('партии (одна лицензия — разные артикулы на 25–49, 50–99, 100–149)', () => {
+  it('число почтовых адресов — это места', () => {
+    expect(seatCount('Kaspersky для почтовых серверов на 50 почтовых адресов')).toBe(50)
+    expect(seatCount('50 почтовых ящиков')).toBe(50)
+  })
+  it('попадание в партию', () => {
+    expect(lotFits({ min: 50, max: 99 }, 50)).toBe(true)
+    expect(lotFits({ min: 50, max: 99 }, 99)).toBe(true)
+    expect(lotFits({ min: 100, max: 149 }, 50)).toBe(false)
+    expect(lotFits({ min: 150, max: null }, 500)).toBe(true)
+    expect(lotFits(null, 1)).toBe(true)
+  })
+  it('описание без партии одинаково у соседних артикулов', () => {
+    const a = 'Кол-во в заказе: от 50 до 99 • Тип лицензии: новая'
+    const b = 'Кол-во в заказе: от 100 до 149 • Тип лицензии: новая'
+    expect(withoutLot(a)).toBe(withoutLot(b))
+    expect(lotText({ min: 50, max: 99 })).toBe('от 50 до 99 шт.')
+    expect(lotText({ min: 150, max: null })).toBe('от 150 шт.')
   })
 })

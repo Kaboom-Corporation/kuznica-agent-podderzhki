@@ -15,6 +15,7 @@ import { pipeline } from 'node:stream/promises'
 import { createGunzip } from 'node:zlib'
 import type pg from 'pg'
 import { toCents } from '../ported/invoices/money'
+import { LOT_PREFIX } from '../agent/catalog-search'
 
 const ENT: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' }
 export function decode(s: string): string {
@@ -70,7 +71,12 @@ export function parseOffer(block: string, categoryPath: (id: string) => string):
   if (registry) extra.push(`№ в реестре отечественного ПО: ${registry}`)
   const delivery = p1('Тип поставки')
   if (delivery) extra.push(`Поставка: ${delivery}`)
-  const description = [tag(block, 'description'), ...extra].filter(Boolean).join(' • ').slice(0, 900)
+  // Партия: «Кол-во от 25 до 49 шт.» в sales_notes. У Касперского одна и та же лицензия идёт под разными
+  // артикулами на 25–49, 50–99, 100–149 мест с разной ценой за место — без этого поля КП на 50 мест
+  // считалось по цене партии 100–149 (стенд 27.11, КП-103). Первым, чтобы не отрезалось при сокращении описания.
+  const lot = /Кол-во\s+от\s*(\d+)(?:\s*до\s*(\d+))?/i.exec(tag(block, 'sales_notes'))
+  const lotText = lot ? `${LOT_PREFIX} от ${lot[1]}${lot[2] ? ` до ${lot[2]}` : ''}` : ''
+  const description = [lotText, tag(block, 'description'), ...extra].filter(Boolean).join(' • ').slice(0, 900)
 
   return {
     sku: `SL-${id}`,

@@ -5,7 +5,7 @@
  */
 import { q, q1 } from '../lib/db'
 import { searchKb } from '../ported/rag/searcher'
-import { buildTsQueries, perSeat, russianVendor, seatCount, termMonths } from './catalog-search'
+import { buildTsQueries, lotFits, lotText, orderLot, perSeat, russianVendor, seatCount, termMonths, withoutLot } from './catalog-search'
 import { absorb, type Facts } from './verify'
 import { discountAsk } from './money-asks'
 import { buildQuote,quoteForModel, rub, CONDITIONS, GOODWILL_RULE, type CatalogItem, type Condition, type PriceRule } from './quote'
@@ -162,6 +162,7 @@ async function checkStock(query: string, question = '') {
       ...(seats && seats > 1 && perSeat(r.name) ? { total_for_seats: `${rub(BigInt(r.price_cents) * BigInt(seats))} за ${seats} мест` } : {}),
       // сколько ставить в qty для get_price/draft_proposal: цена за место → число мест, комплект «на 50 ПК» → 1
       ...(seats && seats > 1 ? { qty_for_order: perSeat(r.name) ? seats : 1 } : {}),
+      ...lotView(r, seats),
       sku: r.sku,
       name: r.name,
       vendor: r.vendor,
@@ -179,6 +180,37 @@ async function checkStock(query: string, question = '') {
       description: r.description.length > 300 ? `${r.description.slice(0, 300)}…` : r.description,
     })),
   }
+}
+
+/** Партия позиции для модели: «продаётся партией от 25 до 49 шт.», а если клиенту нужно другое число — прямо об этом. */
+function lotView(r: CatalogItem, seats: number | null) {
+  const lot = orderLot(r.description)
+  if (!lot) return {}
+  const fits = seats == null || !perSeat(r.name) || lotFits(lot, seats)
+  return { order_qty: fits ? `продаётся партией ${lotText(lot)}` : `продаётся партией ${lotText(lot)} — клиенту нужно ${seats}, эта позиция не подходит, возьми позицию с подходящей партией` }
+}
+
+/**
+ * Количество вне партии («SL-3851 — от 100 до 149», а нужно 50): ищем ту же лицензию в подходящей партии
+ * и возвращаем модели её артикул. Молча не подменяем — как и с qty 1 при цене за место.
+ */
+async function lotErrors(wanted: { item: CatalogItem; qty: number }[]): Promise<string | null> {
+  const off = wanted.filter(w => !lotFits(orderLot(w.item.description), w.qty))
+  if (!off.length) return null
+  const hints = await Promise.all(off.map(async (w) => {
+    const lot = orderLot(w.item.description)!
+    const same = await q<CatalogItem>(
+      'select * from catalog_items where name = $1 and term_months is not distinct from $2 and sku <> $3',
+      [w.item.name, w.item.term_months, w.item.sku],
+    )
+    const base = withoutLot(w.item.description)
+    const fit = same.find(s => withoutLot(s.description) === base && orderLot(s.description) && lotFits(orderLot(s.description), w.qty))
+    const head = `${w.item.sku} продаётся только партией ${lotText(lot)}, а нужно ${w.qty}.`
+    return fit
+      ? `${head} Для ${w.qty} шт. есть ${fit.sku} (партия ${lotText(orderLot(fit.description)!)}, ${rub(BigInt(fit.price_cents))} за шт.) — передай ${fit.sku} вместо ${w.item.sku}.`
+      : `${head} Подходящей партии в каталоге нет — не считай сам, передай вопрос менеджеру (handoff_to_manager).`
+  }))
+  return hints.join(' ')
 }
 
 /**
@@ -206,6 +238,11 @@ export async function findItems(query: string, question = ''): Promise<CatalogIt
             when $3::int between substring(c.description from 'узлов от (\\d+)')::int and substring(c.description from 'узлов от \\d+ до (\\d+)')::int then 0.4
             else -0.3 end
         -- модули и дополнения («КОМПАС-3D v25: Оборудование», «компонент к Компас-3D») ниже самого продукта
+        -- партия из фида («Кол-во в заказе: от 50 до 99»): та же лицензия на другое число мест стоит иначе
+        + case when $3::text is null or c.description !~ '^Кол-во в заказе: от \\d+' then 0
+            when $3::int >= substring(c.description from '^Кол-во в заказе: от (\\d+)')::int
+             and $3::int <= coalesce(substring(c.description from '^Кол-во в заказе: от \\d+ до (\\d+)')::int, 2147483647) then 0.4
+            else -0.5 end
         - case when c.name ~ ':' or c.name ~* '\\sк\\s' then 0.2 else 0 end
         -- особые условия (акция, продление, для школ и вузов) — только если клиент сам о них заговорил
         - case when c.name ~* $6 and $5 !~* $6 then 0.3 else 0 end desc
@@ -247,6 +284,8 @@ async function quote(args: Record<string, unknown>, t: Turn) {
   if (lone.length) {
     return { error: `${lone.map(w => w.item.sku).join(', ')}: цена за одно место, а клиенту нужно ${seats}. Передай qty ${seats} для этих позиций (qty_for_order из check_stock).` }
   }
+  const lotError = await lotErrors(wanted)
+  if (lotError) return { error: lotError }
   const rules = [...await q<PriceRule>('select * from price_rules'), GOODWILL_RULE]
   const conditions = parseConditions(args.conditions)
   // клиент в этой реплике сам попросил скидку — 5% даём, даже если модель забыла asked_discount

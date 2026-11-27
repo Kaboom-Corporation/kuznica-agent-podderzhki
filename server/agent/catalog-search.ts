@@ -66,8 +66,30 @@ function term(w: string): string {
  * но позиции с таким числом мест в названии поднимаем выше: «Standard на 3 устр.» раньше «на 5 устр.».
  */
 export function seatCount(query: string): number | null {
-  const m = query.toLowerCase().match(/(\d{1,5})\s*(?:-?х\s*)?(устр|пк|компьют|комп|польз|раб|лиц|сотрудн|ус)/)
+  const m = query.toLowerCase().match(/(\d{1,5})\s*(?:-?х\s*)?(устр|пк|компьют|комп|польз|раб|лиц|сотрудн|ус|почт|адрес|ящик|узл)/)
   return m ? Number(m[1]) : null
+}
+
+/** Начало описания позиции, которая продаётся партией: «Кол-во в заказе: от 25 до 49» (из sales_notes фида). */
+export const LOT_PREFIX = 'Кол-во в заказе:'
+export interface Lot { min: number; max: number | null }
+
+export function orderLot(description: string | null | undefined): Lot | null {
+  const m = /Кол-во в заказе: от (\d+)(?: до (\d+))?/.exec(description ?? '')
+  return m ? { min: Number(m[1]), max: m[2] ? Number(m[2]) : null } : null
+}
+
+export function lotFits(lot: Lot | null, qty: number): boolean {
+  return !lot || (qty >= lot.min && (lot.max == null || qty <= lot.max))
+}
+
+export function lotText(lot: Lot): string {
+  return lot.max == null ? `от ${lot.min} шт.` : `от ${lot.min} до ${lot.max} шт.`
+}
+
+/** Описание без партии: по нему ищем ту же позицию в другой партии (тот же тип лицензии и организации). */
+export function withoutLot(description: string): string {
+  return description.replace(/^Кол-во в заказе: [^•]*•\s*/, '')
 }
 
 /**
