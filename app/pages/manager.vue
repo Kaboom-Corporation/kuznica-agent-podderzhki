@@ -550,8 +550,8 @@ onBeforeUnmount(() => {
                     <th>Инструменты</th>
                     <th class="r">Токены</th>
                     <th class="r">₽</th>
-                    <th class="r">с</th>
-                    <th>Сверка</th>
+                    <th class="r" title="Время ответа в секундах">Сек</th>
+                    <th style="white-space:nowrap">Сверка</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -562,7 +562,7 @@ onBeforeUnmount(() => {
                     <td class="r num" style="font-size:12px">{{ r.input_tokens }} / {{ r.output_tokens }}</td>
                     <td class="r num" style="font-size:12px">{{ Number(r.cost_rub).toFixed(2) }}</td>
                     <td class="r num" style="font-size:12px">{{ (r.duration_ms / 1000).toFixed(1) }}</td>
-                    <td>
+                    <td style="white-space:nowrap">
                       <span class="status">
                         <span class="status-dot" :class="r.verify_issues?.length ? 'bad' : 'ok'" aria-hidden="true" />
                         <span>{{ r.verify_issues?.length ? `${r.verify_issues.length} расхожд.` : 'ОК' }}</span>
@@ -1100,6 +1100,12 @@ onBeforeUnmount(() => {
   text-align: right;
   padding-right: 0;
   padding-left: 12px;
+  white-space: nowrap;
+}
+
+/* Число по правому краю не должно прилипать к соседней колонке справа */
+.tbl .r:not(:last-child) {
+  padding-right: 20px;
 }
 
 .tbl-name {

@@ -53,6 +53,10 @@ export default defineNuxtConfig({
     feedUrl: '',
     public: {
       shopName: 'Демо Софт — магазин лицензий',
+      // Виджет сбора замечаний для внутренней проверки стенда. Пусто = выключен.
+      // Включается в браузере ссылкой с ?feedback=1, выключается ?feedback=0.
+      feedbackScript: '',
+      feedbackProject: '',
     },
   },
 })
