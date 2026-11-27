@@ -7,7 +7,7 @@ interface Proposal { id: string; number: string; status: string; customer: any; 
 interface Escalation { id: number; kind: string; question: string; reason: string; resolved: boolean; created_at: string }
 interface Run { id: number; model: string; steps: number; input_tokens: number; output_tokens: number; cost_rub: string; duration_ms: number; tools: any; escalated: boolean; verify_issues: any[]; created_at: string }
 interface Card { conversation: any; messages: { id: number; role: string; content: string; created_at: string }[]; proposals: Proposal[]; invoices: any[]; escalations: Escalation[]; runs: Run[] }
-interface Stats { days: number; totals: { conversations: number; runs: number; escalated_runs: number; cost_rub: string; avg_cost_rub: string; median_ms: number; verify_issues: number }; byModel: { model: string; runs: number; cost_rub: string }[]; proposals: { status: string; n: number; total_cents: string }[]; gaps: (Escalation & { conversation_id: string })[]; learned?: { slug: string; title: string; updated_at: string }[] }
+interface Stats { days: number; totals: { conversations: number; runs: number; escalated_runs: number; cost_rub: string; avg_cost_rub: string; median_ms: number; verify_issues: number }; closed?: { total: number; by_agent: number; with_proposal: number } | null; byModel: { model: string; runs: number; cost_rub: string }[]; proposals: { status: string; n: number; total_cents: string }[]; gaps: (Escalation & { conversation_id: string })[]; learned?: { slug: string; title: string; updated_at: string }[] }
 
 const TOKEN_KEY = 'manager-token'
 const token = ref('')
@@ -143,6 +143,11 @@ const selfShare = computed(() => {
   const t = stats.value?.totals
   if (!t?.runs) return '—'
   return Math.round(100 * (1 - t.escalated_runs / t.runs)) + '%'
+})
+const closedShare = computed(() => {
+  const c = stats.value?.closed
+  if (!c?.total) return '—'
+  return Math.round(100 * c.by_agent / c.total) + '%'
 })
 
 watch(filter, refresh)
@@ -294,6 +299,7 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); if (pdfUrl.value) URL.r
       </div>
       <div class="tiles">
         <div class="tile"><div class="muted tiny">Обращений</div><div class="big num">{{ stats.totals.conversations }}</div></div>
+        <div v-if="stats.closed" class="tile" title="Обращение обошлось без менеджера: ни передачи, ни ответа человека, ни отклонённого КП. КП, которое менеджер подтвердил одной кнопкой, тоже считается закрытым агентом"><div class="muted tiny">Закрыто агентом</div><div class="big num">{{ closedShare }}</div><div class="muted tiny">{{ stats.closed.by_agent }} из {{ stats.closed.total }} обращений, из них с КП: {{ stats.closed.with_proposal }}</div></div>
         <div class="tile"><div class="muted tiny">Ответов без менеджера</div><div class="big num">{{ selfShare }}</div><div class="muted tiny">по запускам агента: {{ stats.totals.runs - stats.totals.escalated_runs }} из {{ stats.totals.runs }}</div></div>
         <div class="tile"><div class="muted tiny">Средняя цена запроса</div><div class="big num">{{ fmtRub(stats.totals.avg_cost_rub) }}</div><div class="muted tiny">всего {{ fmtRub(stats.totals.cost_rub) }}</div></div>
         <div class="tile"><div class="muted tiny">Медиана ответа</div><div class="big num">{{ (stats.totals.median_ms / 1000).toFixed(1) }} с</div></div>
