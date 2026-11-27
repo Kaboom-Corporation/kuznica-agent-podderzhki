@@ -120,7 +120,7 @@ export async function ask(input: AskInput): Promise<AgentReply> {
   }
   if (discount === 'goodwill') {
     // «скидка 5%» — правило магазина, называть его можно и до расчёта
-    absorbQuestion(t.facts, `скидка ${GOODWILL_PCT}%`)
+    t.facts.percents.add(GOODWILL_PCT)
     const [last] = await q<{ items: { sku: string; qty: number }[] }>(
       `select items from proposals where conversation_id = $1 order by created_at desc limit 1`, [conversationId])
     if (last?.items?.length) money.push({ name: 'get_price', args: { items: last.items.map(i => ({ sku: i.sku, qty: i.qty })), conditions: ['asked_discount'] } })
@@ -132,7 +132,7 @@ export async function ask(input: AskInput): Promise<AgentReply> {
       msgs.push({ role: 'tool', tool_call_id: calls[i]!.id, name: m.name, content: toJson(await runTool(m.name, m.args, t)) })
   }
   const moneyHint = (discount === 'goodwill'
-    ? ` Клиент просит скидку: 5% магазин даёт без менеджера (это не индивидуальная скидка). ${money.some(m => m.name === 'get_price') ? 'Цена со скидкой уже посчитана в get_price выше — назови её и предложи обновить КП (draft_proposal с conditions asked_discount).' : 'КП ещё нет: если позиции и количество уже выбраны — посчитай цену через get_price с conditions asked_discount; если нет — скажи, что скидку 5% дашь, и уточни позиции. Сумму со скидкой сам не считай.'} Больше 5% — только менеджер.`
+    ? ` Клиент просит скидку: 5% магазин даёт без менеджера (это не индивидуальная скидка). ${money.some(m => m.name === 'get_price') ? 'Цена со скидкой уже посчитана в get_price выше — назови её и предложи обновить КП (draft_proposal с conditions asked_discount).' : 'КП ещё нет: если позиции и количество уже выбраны — посчитай цену через get_price с conditions asked_discount; если нет — скажи, что скидку 5% дашь, и уточни позиции. Сумму со скидкой сам не считай.'} Больше 5% — только менеджер. Названия инструментов и условий (get_price, asked_discount) клиенту не пиши.`
     : '') + (money.some(m => m.name === 'handoff_to_manager')
     ? ' Просьба клиента об отсрочке или большей скидке уже передана менеджеру (handoff_to_manager выше): скажи об этом и ничего не обещай за него.'
     : '')
