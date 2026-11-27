@@ -241,9 +241,9 @@ onBeforeUnmount(() => {
       <div class="topbar-inner">
         <div class="brand-group">
           <div class="brand-mark" aria-hidden="true">ДС</div>
-          <span class="brand-name">Демо Софт</span>
-          <span class="crumb-sep">/</span>
-          <span class="muted" style="font-size:13px">Менеджер</span>
+          <span class="brand-name hide-narrow">Демо Софт</span>
+          <span class="crumb-sep hide-narrow">/</span>
+          <span class="muted hide-narrow" style="font-size:13px">Менеджер</span>
 
           <nav v-if="token" class="view-tabs" aria-label="Разделы">
             <button class="view-tab" :aria-pressed="tab === 'queue'" @click="tab = 'queue'">
@@ -546,7 +546,7 @@ onBeforeUnmount(() => {
           <dd class="metric-sub">{{ stats.totals.runs - stats.totals.escalated_runs }} из {{ stats.totals.runs }}</dd>
         </div>
         <div class="metric">
-          <dt>Средняя цена</dt>
+          <dt>Цена обращения</dt>
           <dd class="metric-val num">{{ fmtRub(stats.totals.avg_cost_rub) }}</dd>
           <dd class="metric-sub">всего {{ fmtRub(stats.totals.cost_rub) }}</dd>
         </div>
@@ -1299,5 +1299,16 @@ onBeforeUnmount(() => {
   .metric { border-right: 0; border-bottom: 1px solid var(--line-soft); padding: 12px 0; }
   .stats-grid { grid-template-columns: 1fr; }
   .ws-bar, .ws-content { padding-left: 16px; padding-right: 16px; }
+}
+
+/* Узкий экран: в шапке остаются знак, вкладки и действия — без наложения и переносов */
+.view-tab, .topbar-right .btn { white-space: nowrap; }
+@media (max-width: 600px) {
+  .hide-narrow { display: none; }
+  .topbar-inner { gap: 6px; padding: 0 12px; }
+  .view-tabs { margin-left: 2px; gap: 0; }
+  .view-tab { padding: 0 6px; }
+  .topbar-right { gap: 2px; }
+  .topbar-right .btn { padding-left: 6px; padding-right: 6px; }
 }
 </style>
