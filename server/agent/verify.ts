@@ -29,17 +29,19 @@ export interface Facts {
   dates: Set<string>
   /** прочие числа из фактов и из вопроса клиента: количества, сроки, артикулы */
   numbers: Set<string>
+  /** «1.8», «7.1» из названий товаров (версии): без них «Astra Linux 1.8» читалось как дата 1 августа */
+  versions: Set<string>
   /** что модель видела в каталоге: артикул и начало названия → есть ли отметка «в реестре» */
   registry: Array<{ sku: string; title: string; inRegistry: boolean }>
 }
 
 export function emptyFacts(today = new Date()): Facts {
-  const f: Facts = { today, money: new Set(), percents: new Set(), dates: new Set(), numbers: new Set(), registry: [] }
+  const f: Facts = { today, money: new Set(), percents: new Set(), dates: new Set(), numbers: new Set(), versions: new Set(), registry: [] }
   f.dates.add(iso(today))
   return f
 }
 
-export interface Mismatch { kind: 'сумма' | 'процент' | 'дата' | 'число' | 'действие' | 'реестр'; value: string }
+export interface Mismatch { kind: 'сумма' | 'процент' | 'дата' | 'версия' | 'число' | 'действие' | 'реестр'; value: string }
 export interface Verdict { ok: boolean; checked: string[]; mismatches: Mismatch[] }
 
 export function describe(m: Mismatch): string {
@@ -102,6 +104,8 @@ export function absorb(facts: Facts, value: unknown): void {
   for (const m of text.matchAll(PCT_RE)) facts.percents.add(Number(m[1]!.replace(',', '.')))
   for (const m of text.matchAll(DATE_ISO_RE)) facts.dates.add(`${m[1]}-${m[2]}-${m[3]}`)
   for (const m of text.matchAll(NUMBER_RE)) facts.numbers.add(String(Number(m[0])))
+  // версия рядом с буквами: «Edition 1.8 «Орел»», «РЕД ОС 7.3» — не дата и не сумма
+  for (const m of text.matchAll(/(?<=\p{L}[\s ]+)(\d{1,2}\.\d{1,2})(?![\d.,])/gu)) facts.versions.add(m[1]!)
   const items = (value as { items?: unknown })?.items
   if (Array.isArray(items)) {
     for (const it of items as Array<{ sku?: unknown; name?: unknown; in_registry?: unknown }>) {
@@ -206,6 +210,11 @@ export function verifyAnswer(answer: string, facts: Facts): Verdict {
     consume(m[0])
   }
   for (const m of [...rest.matchAll(DATE_NUM_RE)]) {
+    if (!m[3] && facts.versions.has(m[0])) {
+      check('версия', m[0], true)
+      consume(m[0])
+      continue
+    }
     const d = resolveDate(Number(m[1]), Number(m[2]), m[3] ? Number(m[3]) : null, facts.today)
     check('дата', m[0], !!d && facts.dates.has(d))
     consume(m[0])

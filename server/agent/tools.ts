@@ -156,6 +156,8 @@ async function checkStock(query: string, question = '') {
     items: rows.map(r => ({
       // цена за узел/пользователя: итог за места клиента считает код, а не модель
       ...(seats && seats > 1 && perSeat(r.name) ? { total_for_seats: `${rub(BigInt(r.price_cents) * BigInt(seats))} за ${seats} мест` } : {}),
+      // сколько ставить в qty для get_price/draft_proposal: цена за место → число мест, комплект «на 50 ПК» → 1
+      ...(seats && seats > 1 ? { qty_for_order: perSeat(r.name) ? seats : 1 } : {}),
       sku: r.sku,
       name: r.name,
       vendor: r.vendor,
@@ -228,8 +230,15 @@ async function quote(args: Record<string, unknown>, t: Turn) {
   const found = await q<CatalogItem>('select * from catalog_items where sku = any($1)', [skus])
   const missing = skus.filter(s => !found.some(f => f.sku === s))
   if (missing.length) return { error: `нет в каталоге: ${missing.join(', ')}. Найди артикул через check_stock.` }
-  const rules = await q<PriceRule>('select * from price_rules')
   const wanted = items.map(i => ({ item: found.find(f => f.sku === i.sku)!, qty: i.qty }))
+  // Цена за место, клиент назвал 50 мест, а модель передала qty 1 — КП вышло бы на одно место.
+  // Молча не правим: возвращаем модели, пусть передаст число мест сама.
+  const seats = [t.question, ...(t.earlier ?? []).toReversed()].map(s => seatCount(s)).find(n => n != null)
+  const lone = seats && seats > 1 ? wanted.filter(w => w.qty === 1 && perSeat(w.item.name)) : []
+  if (lone.length) {
+    return { error: `${lone.map(w => w.item.sku).join(', ')}: цена за одно место, а клиенту нужно ${seats}. Передай qty ${seats} для этих позиций (qty_for_order из check_stock).` }
+  }
+  const rules = await q<PriceRule>('select * from price_rules')
   const quote = buildQuote(wanted, rules, parseConditions(args.conditions), t.vatPercent)
   return { quote, wanted }
 }

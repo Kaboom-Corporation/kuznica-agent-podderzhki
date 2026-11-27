@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { renderMd, rub } from '~/utils/md'
+import { qtyUnit, renderMd, rub } from '~/utils/md'
 
 interface Row { id: string; channel: string; status: string; subject: string | null; customer_company: string | null; updated_at: string; last_question: string | null; draft_proposals: number; open_escalations: number; cost_rub: string }
 interface Item { sku: string; name: string; unit: string; qty: number; unit_cents: string; discount_pct: number; sum_cents: string }
@@ -203,7 +203,7 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); if (pdfUrl.value) URL.r
 
         <div v-for="p in card.proposals" :key="p.id" class="prop">
           <div class="prophead">
-            <strong>КП {{ p.number }}</strong>
+            <strong>{{ p.number.startsWith('КП') ? p.number : `КП ${p.number}` }}</strong>
             <span class="chip" :class="STATUS[p.status]?.[1]">{{ STATUS[p.status]?.[0] || p.status }}</span>
             <span v-if="p.valid_until" class="muted tiny">действует до {{ p.valid_until }}</span>
           </div>
@@ -212,8 +212,8 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); if (pdfUrl.value) URL.r
               <thead><tr><th>Позиция</th><th class="r">Кол-во</th><th class="r">Цена</th><th class="r">Скидка</th><th class="r">Сумма</th></tr></thead>
               <tbody>
                 <tr v-for="i in p.items" :key="i.sku">
-                  <td>{{ i.name }} <span class="muted tiny">{{ i.sku }}</span></td>
-                  <td class="r num">{{ i.qty }} {{ i.unit }}</td>
+                  <td>{{ i.name }} <span class="muted tiny num">{{ i.sku }}</span></td>
+                  <td class="r num">{{ qtyUnit(i.qty, i.unit) }}</td>
                   <td class="r num">{{ rub(i.unit_cents) }}</td>
                   <td class="r num">{{ i.discount_pct ? i.discount_pct + '%' : '—' }}</td>
                   <td class="r num">{{ rub(i.sum_cents) }}</td>

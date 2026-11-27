@@ -7,16 +7,28 @@ export function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;')
 }
 
+// Адрес ссылки: без пробелов, скобок, кавычек, `*` и обратных кавычек — разметка не может попасть внутрь href.
+const URL = 'https?:\\/\\/[^\\s()<>"\'`*\\[\\]\\u0000]+'
+// Один проход: [текст](адрес) или голый адрес. Регулярки не бегают по уже собранному HTML.
+const LINK_RE = new RegExp(`\\[([^\\]\\n\\u0000]+)\\]\\((${URL})\\)|(${URL})`, 'g')
+const PH_RE = /\u0000(\d+)\u0000/g
+
 function inline(s: string): string {
-  return s
+  const links: string[] = []
+  const a = (href: string, text: string) => `<a href="${href}" target="_blank" rel="noopener noreferrer">${text}</a>`
+  // ссылки → заглушки \0N\0 (в исходном тексте \0 вырезан, подделать заглушку нельзя)
+  const text = s.replace(LINK_RE, (_m, label: string | undefined, href: string | undefined, bare: string | undefined) => {
+    links.push(label !== undefined ? a(href!, label) : a(bare!, bare!))
+    return `\u0000${links.length - 1}\u0000`
+  })
+  return text
     .replace(/`([^`\n]+)`/g, '<code>$1</code>')
     .replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>')
-    .replace(/\[([^\]\n]+)\]\((https?:\/\/[^\s)"]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>')
-    .replace(/(^|[\s(])(https?:\/\/[^\s<)"]+)/g, '$1<a href="$2" target="_blank" rel="noopener noreferrer">$2</a>')
+    .replace(PH_RE, (_m, i: string) => links[Number(i)] ?? '')
 }
 
 export function renderMd(src: string): string {
-  const lines = escapeHtml(src.replace(/\r\n?/g, '\n')).split('\n')
+  const lines = escapeHtml(src.replace(/\r\n?/g, '\n').replace(/\u0000/g, '')).split('\n')
   const out: string[] = []
   let list: 'ul' | 'ol' | null = null
   let para: string[] = []
@@ -50,4 +62,14 @@ export function renderMd(src: string): string {
 export function rub(cents: string | number | null | undefined): string {
   const n = Number(cents ?? 0) / 100
   return n.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' ₽'
+}
+
+const FORMS: Record<string, [string, string, string]> = { лицензия: ['лицензия', 'лицензии', 'лицензий'] }
+/** «50 лицензия» → «50 лицензий»; «шт.» и незнакомые единицы — как есть. */
+export function qtyUnit(qty: number, unit: string): string {
+  const f = FORMS[unit]
+  if (!f) return `${qty} ${unit}`
+  const n10 = qty % 10, n100 = qty % 100
+  const form = n10 === 1 && n100 !== 11 ? f[0] : n10 >= 2 && n10 <= 4 && (n100 < 12 || n100 > 14) ? f[1] : f[2]
+  return `${qty} ${form}`
 }

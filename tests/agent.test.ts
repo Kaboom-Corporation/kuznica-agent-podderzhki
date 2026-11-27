@@ -38,6 +38,14 @@ describe('verify', () => {
     expect(verifyAnswer('С вашим бюджетом до 400 тыс. руб. (а лучше не больше 1 500 000 ₽) подойдёт…', f).ok).toBe(true)
     expect(verifyAnswer('Выйдет 450 тыс. ₽.', f).ok).toBe(false)
   })
+  it('версия из названия товара — не дата; выдуманная версия не проходит', () => {
+    const f = emptyFacts(today)
+    absorb(f, { items: [{ sku: 'SL-517991', name: 'Astra Linux Special Edition 1.8 «Орел» для рабочей станции', price: '3 100,00 ₽' }] })
+    expect(verifyAnswer('Astra Linux Special Edition 1.8 «Орел» (SL-517991) — 3 100,00 ₽.', f).ok).toBe(true)
+    const bad = verifyAnswer('Astra Linux Special Edition 1.9 — 3 100,00 ₽.', f)
+    expect(bad.ok).toBe(false)
+    expect(bad.mismatches).toEqual([{ kind: 'дата', value: '1.9' }])
+  })
   it('итог комплекта — сумма названных цен из каталога, не больше', () => {
     const f = emptyFacts(today)
     absorb(f, { items: [{ price: '80 818,40 ₽' }, { price: '61 830,00 ₽' }, { price: '135 765,00 ₽' }] })
