@@ -24,7 +24,7 @@ export interface Turn {
   escalation: Escalation | null
   searched: boolean
   embedTokens: number
-  calls: { name: string; ms: number; ok: boolean }[]
+  calls: { name: string; ms: number; ok: boolean; error?: string }[]
   vatPercent: number
 }
 
@@ -71,17 +71,18 @@ function conditionsSchema() {
 
 export async function runTool(name: string, args: Record<string, unknown>, t: Turn): Promise<unknown> {
   const started = Date.now()
-  let ok = true
+  // Текст ошибки пишем в журнал прогона: без него «draft_proposal ×5 не сработал» не разобрать
+  let error: string | undefined
   try {
     const out = await dispatch(name, args, t)
-    if (out && typeof out === 'object' && 'error' in out) ok = false
+    if (out && typeof out === 'object' && 'error' in out) error = String((out as { error: unknown }).error)
     absorb(t.facts, out)
     return out
   } catch (e) {
-    ok = false
-    return { error: `инструмент ${name} не сработал: ${(e as Error).message}` }
+    error = `инструмент ${name} не сработал: ${(e as Error).message}`
+    return { error }
   } finally {
-    t.calls.push({ name, ms: Date.now() - started, ok })
+    t.calls.push({ name, ms: Date.now() - started, ok: !error, ...(error ? { error: error.slice(0, 300) } : {}) })
   }
 }
 
@@ -211,7 +212,11 @@ export async function findItems(query: string, question = ''): Promise<CatalogIt
   return all.length >= 3 ? all : [...all, ...(await run(tq.any)).filter(r => !all.some(a => a.sku === r.sku))].slice(0, 8)
 }
 
-function parseItems(v: unknown): { sku: string; qty: number }[] {
+export function parseItems(v: unknown): { sku: string; qty: number }[] {
+  // локальные модели иногда передают массив строкой JSON
+  if (typeof v === 'string') {
+    try { v = JSON.parse(v) } catch { return [] }
+  }
   if (!Array.isArray(v)) return []
   return v
     .map(x => ({ sku: str((x as any)?.sku), qty: Math.floor(Number((x as any)?.qty)) }))
