@@ -1,6 +1,25 @@
 import { describe, expect, it } from 'vitest'
 import { buildQuote, GOODWILL_RULE, rub, vatInside, type CatalogItem, type PriceRule } from '../server/agent/quote'
-import { absorb, absorbQuestion, checkActions, emptyFacts, verifyAnswer } from '../server/agent/verify'
+import { absorb, absorbQuestion, admitsNoAnswer, checkActions, emptyFacts, verifyAnswer } from '../server/agent/verify'
+
+describe('admitsNoAnswer', () => {
+  it('распознаёт признание, что ответа нет', () => {
+    for (const s of [
+      'Информации о пробной версии Kaspersky Endpoint Security в базе знаний нет.',
+      'К сожалению, в базе знаний нет сведений об этом.',
+      'У меня нет информации о выездной установке.',
+      'По вашему вопросу я ничего не нашёл.',
+      'Я не могу точно ответить на этот вопрос.',
+    ]) expect(admitsNoAnswer(s), s).toBe(true)
+  })
+  it('не путает с обычным ответом', () => {
+    for (const s of [
+      'Товара сейчас нет в наличии, но КП и счёт оформить можно.',
+      'Цена лицензии — 3 500 ₽ с НДС. Данные взяты из каталога.',
+      'Для активации введите ключ в разделе «Лицензия».',
+    ]) expect(admitsNoAnswer(s), s).toBe(false)
+  })
+})
 
 const item = (sku: string, price: bigint, extra: Partial<CatalogItem> = {}): CatalogItem => ({
   sku, name: sku, vendor: 'Вендор', category: 'antivirus', unit: 'лицензия', term_months: 12,

@@ -14,7 +14,7 @@ import { pickLlm, type Llm } from './llm'
 import { systemPrompt, systemTail } from './prompt'
 import { analogQuery, clarifyFirst, selectionQueries } from './catalog-search'
 import { TOOL_DEFS, runTool, type Turn, type Source, type Draft, type Escalation } from './tools'
-import { absorbQuestion, checkActions, checkRegistry, describe, emptyFacts, verifyAnswer, type Verdict } from './verify'
+import { absorbQuestion, admitsNoAnswer, checkActions, checkRegistry, describe, emptyFacts, verifyAnswer, type Verdict } from './verify'
 
 export const MAX_STEPS = 8
 export const MAX_CALLS_PER_STEP = 3
@@ -42,7 +42,8 @@ export interface AskInput {
   today?: Date
 }
 
-const HANDOFF_TEXT = 'Чтобы не ошибиться в цифрах, я передал ваш вопрос менеджеру — он ответит в рабочее время. Если удобно, оставьте телефон или почту для связи.'
+const NO_ANSWER_TAIL = 'Я передал ваш вопрос менеджеру — он ответит здесь же в рабочее время.'
+const HANDOFF_TEXT ='Чтобы не ошибиться в цифрах, я передал ваш вопрос менеджеру — он ответит в рабочее время. Если удобно, оставьте телефон или почту для связи.'
 
 export async function ask(input: AskInput): Promise<AgentReply> {
   const started = Date.now()
@@ -206,6 +207,10 @@ export async function ask(input: AskInput): Promise<AgentReply> {
   else if (!verdict.ok) {
     t.escalation = { kind: 'verify_failed', reason: `черновик ответа: ${final}\nрасхождения: ${verdict.mismatches.map(describe).join('; ')}` }
     final = HANDOFF_TEXT
+  }
+  else if (!t.escalation && !t.drafts.length && admitsNoAnswer(final)) {
+    t.escalation = { kind: 'no_answer', reason: 'агент ответил, что в базе знаний ответа нет, и не передал вопрос сам' }
+    final = `${final}\n\n${NO_ANSWER_TAIL}`
   }
 
   const text = pii.restore(final)

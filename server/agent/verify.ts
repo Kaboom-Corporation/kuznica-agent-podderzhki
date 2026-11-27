@@ -70,6 +70,21 @@ export function checkActions(answer: string, done: { proposal: boolean; invoice:
   return out
 }
 
+// Малая модель часто честно пишет «в базе знаний этого нет», но handoff_to_manager не зовёт —
+// и вопрос повисает без менеджера. Такие ответы код распознаёт и передаёт менеджеру сам.
+const NO_ANSWER: RegExp[] = [
+  /(?<!\p{L})(?:информаци|сведени|данн)\p{L}*[^.!?\n]{0,80}?(?<!\p{L})(?:нет|отсутству\p{L}*)(?!\p{L})/iu,
+  /(?<!\p{L})нет(?!\p{L})[^.!?\n]{0,20}?(?<!\p{L})(?:информаци|сведени|данн)\p{L}*/iu,
+  /(?<!\p{L})(?:нет|отсутству\p{L}*)(?!\p{L})[^.!?\n]{0,20}?в баз\p{L}* знаний|в баз\p{L}* знаний[^.!?\n]{0,40}?(?<!\p{L})(?:нет|отсутству\p{L}*)(?!\p{L})/iu,
+  /(?<!\p{L})не (?:нашл\p{L}*|наш[её]л|удалось найти)(?!\p{L})/iu,
+  /(?<!\p{L})не могу (?:точно )?(?:ответить|подсказать|сказать)(?!\p{L})/iu,
+]
+
+/** Ответ признаёт, что в базе ответа нет. */
+export function admitsNoAnswer(answer: string): boolean {
+  return NO_ANSWER.some(re => re.test(answer))
+}
+
 function iso(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
