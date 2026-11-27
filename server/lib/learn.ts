@@ -10,9 +10,14 @@ import { embedTexts } from '../ported/rag/embeddings'
  */
 export interface Learned { slug: string; title: string }
 
+// Ключи лицензий и активации (XXXXX-XXXXX-XXXXX…) — у каждого клиента свои, другому их показывать нельзя
+const LICENSE_KEY = /\b[A-Z0-9]{4,8}(?:-[A-Z0-9]{4,8}){2,}\b/gi
+const hideKeys = (s: string) => s.replace(LICENSE_KEY, '[ключ скрыт]')
+
+/** Вопрос клиента — чужой текст: режем по длине, чтобы в базу знаний не уехала простыня с «указаниями» агенту. */
 export function learnedText(question: string, answer: string) {
-  const qm = maskPii(question.trim()).masked
-  const am = maskPii(answer.trim()).masked
+  const qm = hideKeys(maskPii(question.trim().slice(0, 500)).masked)
+  const am = hideKeys(maskPii(answer.trim()).masked)
   const title = `Ответ менеджера: ${qm.replace(/\s+/g, ' ').slice(0, 90)}`
   return { title, content: `Вопрос клиента: ${qm}\n\nОтвет менеджера: ${am}` }
 }

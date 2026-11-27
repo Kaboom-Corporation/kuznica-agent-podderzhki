@@ -4,7 +4,7 @@ import { learnFromManager } from '../../../../lib/learn'
 
 /**
  * Ответ менеджера в диалог (после эскалации). Клиент увидит его в истории чата; эскалации диалога закрываются.
- * remember (по умолчанию да): пара «вопрос клиента → ответ» идёт в базу знаний, и дальше агент отвечает на такой вопрос сам.
+ * remember (только если менеджер отметил): пара «вопрос клиента → ответ» идёт в базу знаний, и дальше агент отвечает на такой вопрос сам.
  */
 export default defineEventHandler(async (event) => {
   requireManager(event)
@@ -26,7 +26,8 @@ export default defineEventHandler(async (event) => {
   await q(`update conversations set status = 'open', updated_at = now() where id = $1`, [id])
 
   let learned = null
-  if (body?.remember !== false) {
+  // Только по явной отметке менеджера: ответ про конкретный заказ другому клиенту показывать нельзя
+  if (body?.remember === true) {
     try {
       learned = await learnFromManager(id, question, text)
     }

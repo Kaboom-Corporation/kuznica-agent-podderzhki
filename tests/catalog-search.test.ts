@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { analogQuery, buildTsQueries, clarifyFirst, queryWords, russianVendor, seatCount, selectionQueries, termMonths } from '../server/agent/catalog-search'
-import { decode, parseOffer } from '../scripts/ingest-feed'
+import { decode, parseOffer } from '../server/lib/feed'
 
 describe('первая реплика — только уточнения', () => {
   it('«не знаю, что нужно» без названного продукта', () => {

@@ -107,12 +107,24 @@ const resolve = (e: Escalation) => act(async () => {
   await api(`/api/manager/escalations/${e.id}/resolve`, { method: 'POST' })
   return 'Эскалация закрыта'
 })
-const remember = ref(true)
+// Запоминать — только по отметке: ответ про конкретный заказ другому клиенту не нужен
+const remember = ref(false)
 const sendReply = () => act(async () => {
   const r = await api<{ learned: { title: string } | null }>(`/api/manager/conversations/${selected.value}/reply`, { method: 'POST', body: { text: reply.value, remember: remember.value } })
   reply.value = ''
+  remember.value = false
   return r.learned ? 'Ответ отправлен клиенту и сохранён в базу знаний: на такой вопрос агент дальше ответит сам' : 'Ответ отправлен в чат клиента'
 })
+const forgetting = ref('')
+async function forget(slug: string) {
+  forgetting.value = slug
+  try {
+    await api(`/api/manager/learned/${slug}`, { method: 'DELETE' })
+    await loadStats()
+  }
+  catch {}
+  finally { forgetting.value = '' }
+}
 
 /** PDF закрыт токеном: iframe заголовок не передаст, поэтому забираем файлом и показываем по blob-ссылке. */
 async function showPdf(p: Proposal) {
@@ -313,6 +325,7 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); if (pdfUrl.value) URL.r
           <span class="chip ok">в базе знаний</span>
           <span class="small q">{{ l.title.replace(/^Ответ менеджера: /, '') }}</span>
           <span class="muted tiny num">{{ time(l.updated_at) }}</span>
+          <button class="btn small" :disabled="forgetting === l.slug" title="Убрать из базы знаний: агент перестанет отвечать по этому ответу" @click="forget(l.slug)">Забыть</button>
         </div>
       </div>
 

@@ -21,6 +21,8 @@ export default defineNuxtConfig({
     scheduledTasks: {
       // Опрос входящей почты (IMAP), если настроен.
       '*/1 * * * *': ['mail:poll'],
+      // Каталог из фида магазина раз в сутки: 01:00 UTC = 04:00 МСК, когда обращений меньше всего.
+      '0 1 * * *': ['feed:refresh'],
     },
   },
   runtimeConfig: {
@@ -54,6 +56,8 @@ export default defineNuxtConfig({
     vatPercent: 22,
     // Пустой токен = панель менеджера закрыта (fail-closed). Задать NUXT_MANAGER_TOKEN.
     managerToken: '',
+    // Товарный фид магазина (YML, можно .gz), обновление раз в сутки. Пусто = не обновлять.
+    feedUrl: '',
     public: {
       shopName: 'Демо Софт — магазин лицензий',
     },

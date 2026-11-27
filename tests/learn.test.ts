@@ -15,6 +15,11 @@ describe('ответ менеджера в базу знаний', () => {
     expect(r.content).not.toContain('123-45-67')
     expect(r.title).not.toContain('ivan.petrov')
   })
+  it('ключ лицензии клиента в базу знаний не попадает', () => {
+    const r = learnedText('Не активируется ключ ABCDE-12345-FGHIJ-67890', 'Ключ ABCDE-12345-FGHIJ-67890 привязан к другой редакции, напишите номер заказа.')
+    expect(r.content).not.toContain('ABCDE-12345')
+    expect(r.content).toContain('[ключ скрыт]')
+  })
   it('длинный вопрос в заголовке обрезается', () => {
     expect(learnedText('а'.repeat(300), 'ответ достаточно длинный').title.length).toBeLessThanOrEqual('Ответ менеджера: '.length + 90)
   })
