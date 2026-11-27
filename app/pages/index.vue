@@ -18,6 +18,16 @@ let poll: ReturnType<typeof setInterval> | null = null
 let pollUntil = 0
 let waitTimer: ReturnType<typeof setInterval> | null = null
 
+// «Цены каталога на ДД.ММ ЧЧ:ММ» — чтобы клиент и жюри видели, насколько свежи цифры
+const { data: catalog } = useFetch<{ at: string | null; items: number }>('/api/catalog', { server: false })
+const catalogAt = computed(() => {
+  const at = catalog.value?.at
+  if (!at) return ''
+  return new Date(at).toLocaleString('ru-RU', {
+    timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit',
+  }).replace(',', '')
+})
+
 const starters = [
   'Не знаю, что нужно. Надо защитить почту и файлы на 50 сотрудников',
   'Сколько стоит Kaspersky Endpoint Security на 25 компьютеров?',
@@ -273,7 +283,10 @@ onBeforeUnmount(() => {
             @keydown="onKey"
           />
           <div class="composer-bar">
-            <span class="composer-note">ПДн маскируются до модели · <span class="mono">{{ text.length }}/4000</span></span>
+            <span class="composer-note">
+              ПДн маскируются до модели<template v-if="catalogAt"> · <span :title="`Каталог обновляется из фида магазина каждые сутки, позиций: ${catalog?.items}`">цены каталога на {{ catalogAt }}</span></template>
+              · <span class="mono">{{ text.length }}/4000</span>
+            </span>
             <button class="btn primary" :disabled="busy || !text.trim()" @click="send()">
               Отправить
             </button>
