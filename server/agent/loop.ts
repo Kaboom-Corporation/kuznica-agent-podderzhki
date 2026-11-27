@@ -14,7 +14,7 @@ import { pickLlm, type Llm } from './llm'
 import { systemPrompt, systemTail } from './prompt'
 import { analogQuery, clarifyFirst, selectionQueries } from './catalog-search'
 import { TOOL_DEFS, runTool, type Turn, type Source, type Draft, type Escalation } from './tools'
-import { deferralAsk, discountAsk } from './money-asks'
+import { deferralAsk, discountAsk, GOODWILL_PCT } from './money-asks'
 import { absorbQuestion, admitsNoAnswer, checkActions, checkRegistry, describe, emptyFacts, verifyAnswer, type Verdict } from './verify'
 
 export const MAX_STEPS = 8
@@ -119,6 +119,8 @@ export async function ask(input: AskInput): Promise<AgentReply> {
     money.push({ name: 'handoff_to_manager', args: { kind: 'needs_human', reason: discount === 'manager' ? 'клиент просит скидку больше 5%' : 'клиент просит отсрочку или рассрочку платежа' } })
   }
   if (discount === 'goodwill') {
+    // «скидка 5%» — правило магазина, называть его можно и до расчёта
+    absorbQuestion(t.facts, `скидка ${GOODWILL_PCT}%`)
     const [last] = await q<{ items: { sku: string; qty: number }[] }>(
       `select items from proposals where conversation_id = $1 order by created_at desc limit 1`, [conversationId])
     if (last?.items?.length) money.push({ name: 'get_price', args: { items: last.items.map(i => ({ sku: i.sku, qty: i.qty })), conditions: ['asked_discount'] } })
@@ -130,7 +132,7 @@ export async function ask(input: AskInput): Promise<AgentReply> {
       msgs.push({ role: 'tool', tool_call_id: calls[i]!.id, name: m.name, content: toJson(await runTool(m.name, m.args, t)) })
   }
   const moneyHint = (discount === 'goodwill'
-    ? ` Клиент просит скидку: 5% магазин даёт без менеджера (это не индивидуальная скидка). ${money.some(m => m.name === 'get_price') ? 'Цена со скидкой уже посчитана в get_price выше — назови её и предложи обновить КП (draft_proposal с conditions asked_discount).' : 'Посчитай цену через get_price с conditions asked_discount.'} Больше 5% — только менеджер.`
+    ? ` Клиент просит скидку: 5% магазин даёт без менеджера (это не индивидуальная скидка). ${money.some(m => m.name === 'get_price') ? 'Цена со скидкой уже посчитана в get_price выше — назови её и предложи обновить КП (draft_proposal с conditions asked_discount).' : 'КП ещё нет: если позиции и количество уже выбраны — посчитай цену через get_price с conditions asked_discount; если нет — скажи, что скидку 5% дашь, и уточни позиции. Сумму со скидкой сам не считай.'} Больше 5% — только менеджер.`
     : '') + (money.some(m => m.name === 'handoff_to_manager')
     ? ' Просьба клиента об отсрочке или большей скидке уже передана менеджеру (handoff_to_manager выше): скажи об этом и ничего не обещай за него.'
     : '')
