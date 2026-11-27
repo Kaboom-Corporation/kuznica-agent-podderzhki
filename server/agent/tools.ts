@@ -7,7 +7,8 @@ import { q, q1 } from '../lib/db'
 import { searchKb } from '../ported/rag/searcher'
 import { buildTsQueries, perSeat, russianVendor, seatCount, termMonths } from './catalog-search'
 import { absorb, type Facts } from './verify'
-import { buildQuote, quoteForModel, rub, CONDITIONS, GOODWILL_RULE, type CatalogItem, type Condition, type PriceRule } from './quote'
+import { discountAsk } from './money-asks'
+import { buildQuote,quoteForModel, rub, CONDITIONS, GOODWILL_RULE, type CatalogItem, type Condition, type PriceRule } from './quote'
 
 export interface Source { slug: string; title: string; heading: string | null; expired: boolean }
 export interface Draft { kind: 'proposal' | 'invoice'; id: string; number: string; total: string }
@@ -247,7 +248,10 @@ async function quote(args: Record<string, unknown>, t: Turn) {
     return { error: `${lone.map(w => w.item.sku).join(', ')}: цена за одно место, а клиенту нужно ${seats}. Передай qty ${seats} для этих позиций (qty_for_order из check_stock).` }
   }
   const rules = [...await q<PriceRule>('select * from price_rules'), GOODWILL_RULE]
-  const quote = buildQuote(wanted, rules, parseConditions(args.conditions), t.vatPercent)
+  const conditions = parseConditions(args.conditions)
+  // клиент в этой реплике сам попросил скидку — 5% даём, даже если модель забыла asked_discount
+  if (discountAsk(t.question) === 'goodwill') conditions.add('asked_discount')
+  const quote = buildQuote(wanted, rules, conditions, t.vatPercent)
   return { quote, wanted }
 }
 

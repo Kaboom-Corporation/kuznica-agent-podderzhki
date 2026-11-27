@@ -14,6 +14,7 @@ import { pickLlm, type Llm } from './llm'
 import { systemPrompt, systemTail } from './prompt'
 import { analogQuery, clarifyFirst, selectionQueries } from './catalog-search'
 import { TOOL_DEFS, runTool, type Turn, type Source, type Draft, type Escalation } from './tools'
+import { deferralAsk, discountAsk } from './money-asks'
 import { absorbQuestion, admitsNoAnswer, checkActions, checkRegistry, describe, emptyFacts, verifyAnswer, type Verdict } from './verify'
 
 export const MAX_STEPS = 8
@@ -111,13 +112,36 @@ export async function ask(input: AskInput): Promise<AgentReply> {
       msgs.push({ role: 'tool', tool_call_id: calls[i]!.id, name: 'check_stock', content: toJson(await runTool('check_stock', { query }, t)) })
   }
 
+  // Скидка и отсрочка: что можно агенту, решает код (см. money-asks.ts).
+  const discount = discountAsk(maskedQuestion)
+  const money: { name: string; args: Record<string, unknown> }[] = []
+  if (deferralAsk(maskedQuestion) || discount === 'manager') {
+    money.push({ name: 'handoff_to_manager', args: { kind: 'needs_human', reason: discount === 'manager' ? 'клиент просит скидку больше 5%' : 'клиент просит отсрочку или рассрочку платежа' } })
+  }
+  if (discount === 'goodwill') {
+    const [last] = await q<{ items: { sku: string; qty: number }[] }>(
+      `select items from proposals where conversation_id = $1 order by created_at desc limit 1`, [conversationId])
+    if (last?.items?.length) money.push({ name: 'get_price', args: { items: last.items.map(i => ({ sku: i.sku, qty: i.qty })), conditions: ['asked_discount'] } })
+  }
+  if (money.length) {
+    const calls = money.map((m, i) => ({ id: `auto-money-${i}`, type: 'function' as const, function: { name: m.name, arguments: JSON.stringify(m.args) } }))
+    msgs.push({ role: 'assistant', content: '', tool_calls: calls })
+    for (const [i, m] of money.entries())
+      msgs.push({ role: 'tool', tool_call_id: calls[i]!.id, name: m.name, content: toJson(await runTool(m.name, m.args, t)) })
+  }
+  const moneyHint = (discount === 'goodwill'
+    ? ` Клиент просит скидку: 5% магазин даёт без менеджера (это не индивидуальная скидка). ${money.some(m => m.name === 'get_price') ? 'Цена со скидкой уже посчитана в get_price выше — назови её и предложи обновить КП (draft_proposal с conditions asked_discount).' : 'Посчитай цену через get_price с conditions asked_discount.'} Больше 5% — только менеджер.`
+    : '') + (money.some(m => m.name === 'handoff_to_manager')
+    ? ' Просьба клиента об отсрочке или большей скидке уже передана менеджеру (handoff_to_manager выше): скажи об этом и ничего не обещай за него.'
+    : '')
+
   while (steps < MAX_STEPS && usage.input < MAX_INPUT_TOKENS) {
     steps++
     let res: Awaited<ReturnType<typeof llm.provider.complete>>
     try {
       res = await llm.provider.complete(msgs, {
         system,
-        systemTail: systemTail(today) + (clarify ? ' Клиент не знает, что ему нужно: сейчас ответь только 2–3 короткими уточняющими вопросами, без товаров и цен.' : ''),
+        systemTail: systemTail(today) + moneyHint + (clarify ? ' Клиент не знает, что ему нужно: сейчас ответь только 2–3 короткими уточняющими вопросами, без товаров и цен.' : ''),
         cacheSystem: true,
         ...(clarify ? {} : { tools: TOOL_DEFS as any }),
         gatewayModel: llm.model,
