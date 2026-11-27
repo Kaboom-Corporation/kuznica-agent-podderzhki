@@ -503,7 +503,7 @@ onBeforeUnmount(() => {
       </main>
 
       <main v-else class="ws-empty">
-        <span class="muted">Выберите обращение слева</span>
+        <span class="muted">Выберите обращение в списке</span>
       </main>
     </div>
 
@@ -1293,7 +1293,7 @@ onBeforeUnmount(() => {
 }
 
 @media (max-width: 960px) {
-  .inbox { grid-template-columns: 1fr; }
+  .inbox { grid-template-columns: minmax(0, 1fr); }
   .inbox-list { border-right: 0; border-bottom: 1px solid var(--line); }
   .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .metric { border-right: 0; border-bottom: 1px solid var(--line-soft); padding: 12px 0; }
