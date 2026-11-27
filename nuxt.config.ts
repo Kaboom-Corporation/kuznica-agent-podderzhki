@@ -7,8 +7,13 @@ export default defineNuxtConfig({
       htmlAttrs: { lang: 'ru' },
       title: 'Агент поддержки — консультация, КП, счёт',
       meta: [{ name: 'viewport', content: 'width=device-width, initial-scale=1' }],
+      link: [
+        { rel: 'preconnect', href: 'https://fonts.googleapis.com' },
+        { rel: 'stylesheet', href: 'https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap' },
+      ],
     },
   },
+  css: ['~/assets/ui.css'],
   nitro: {
     // Шрифты для PDF счёта/КП кладём в серверные ассеты (useStorage('assets:fonts')).
     serverAssets: [{ baseName: 'fonts', dir: './assets/fonts' }],
