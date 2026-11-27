@@ -24,6 +24,13 @@ describe('ежедневный фид', () => {
       ['SL-101', 90000n, 0, 'Антивирусы / Для бизнеса'],
     ])
   })
+  it('с onItem позиции не копятся в памяти, а уходят по одной; счётчики те же', async () => {
+    const got: string[] = []
+    const f = await parseFeed(chunks(YML), (i) => { got.push(i.sku) })
+    expect(got).toEqual(['SL-100', 'SL-101'])
+    expect(f.items).toEqual([])
+    expect([f.priced, f.available, f.offers]).toEqual([2, 1, 3])
+  })
   it('битый или урезанный фид каталог не заменяет', () => {
     expect(feedLooksBroken(0, 0)).toBe(true)
     expect(feedLooksBroken(4000, 10000)).toBe(true)

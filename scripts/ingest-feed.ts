@@ -6,19 +6,18 @@
  */
 import { existsSync } from 'node:fs'
 import { db } from '../server/lib/db.ts'
-import { feedFileStream, feedSummary, fetchFeed, parseFeed, replaceCatalog } from '../server/lib/feed.ts'
+import { feedSummary, loadFeed, withFeed } from '../server/lib/feed.ts'
 
 async function main() {
   if (existsSync('.env')) process.loadEnvFile('.env')
   const FEED = process.argv[2]
   if (!FEED) { console.error('укажи путь к фиду: npm run ingest:feed -- feed.xml'); process.exit(2) }
-  const feed = /^https?:\/\//.test(FEED) ? await fetchFeed(FEED) : await parseFeed(feedFileStream(FEED))
-  if (!feed.items.length) throw new Error('в фиде нет позиций с ценой — каталог не тронут')
   const pool = db()
   const client = await pool.connect()
   try {
-    await replaceCatalog(client, feed.items)
-    console.log(feedSummary(feed))
+    const r = await withFeed(FEED, s => loadFeed(client, s))
+    if (!r.applied) throw new Error(`фид не применён: позиций с ценой ${r.feed.priced}, в каталоге было ${r.current} — каталог не тронут`)
+    console.log(feedSummary(r.feed))
   }
   finally {
     client.release()

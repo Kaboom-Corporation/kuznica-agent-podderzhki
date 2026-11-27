@@ -1,5 +1,5 @@
 /**
- * Прогон тестового набора: npx tsx scripts/eval.ts <ollama|gateway|anthropic> <модель|-> [--file eval/questions-softline.json] [s01 s02 …]
+ * Прогон тестового набора: npx tsx scripts/eval.ts <ollama|gateway> <модель|-> [--file eval/questions-softline.json] [s01 s02 …]
  * Каждый вопрос — новый диалог; turns — реплики одного диалога подряд. Результат пишется
  * после каждого вопроса в eval/results-<время>.json (в .gitignore), в конце — сводка по категориям.
  */
@@ -12,7 +12,7 @@ const argv = process.argv.slice(2)
 const fileAt = argv.indexOf('--file')
 const file = fileAt >= 0 ? argv[fileAt + 1]! : 'eval/questions-softline.json'
 const [kind, modelArg, ...ids] = argv.filter((a, i) => a !== '--file' && i !== fileAt + 1)
-if (!kind) { console.error('нужно: <ollama|gateway|anthropic> <модель|-> [id…]'); process.exit(1) }
+if (!kind) { console.error('нужно: <ollama|gateway> <модель|-> [id…]'); process.exit(1) }
 
 const { ask } = await import('../server/agent/loop')
 const { db, q } = await import('../server/lib/db')

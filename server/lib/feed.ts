@@ -87,10 +87,20 @@ export function parseOffer(block: string, categoryPath: (id: string) => string):
   }
 }
 
-export interface ParsedFeed { items: FeedItem[]; offers: number; categories: number }
+export interface ParsedFeed {
+  /** Позиции с ценой; пусто, если разбор шёл с onItem (тогда позиции сразу уходят в базу). */
+  items: FeedItem[]
+  offers: number; categories: number; priced: number; available: number; registry: number
+}
 
-/** Разбор потоком: фид магазина — десятки мегабайт, целиком в память не читаем. */
-export async function parseFeed(source: AsyncIterable<string | Buffer>): Promise<ParsedFeed> {
+/**
+ * Разбор потоком: фид магазина — сотни мегабайт после распаковки, целиком в память не читаем.
+ * С onItem позиции не копятся: 55 тыс. позиций в массиве — это ~450 МБ, а у приложения на стенде потолок 512 МБ.
+ */
+export async function parseFeed(
+  source: AsyncIterable<string | Buffer>,
+  onItem?: (item: FeedItem) => void | Promise<void>,
+): Promise<ParsedFeed> {
   const cats = new Map<string, { name: string; parent: string | null }>()
   const path = (id: string): string => {
     const names: string[] = []
@@ -106,6 +116,9 @@ export async function parseFeed(source: AsyncIterable<string | Buffer>): Promise
 
   const items: FeedItem[] = []
   let offers = 0
+  let priced = 0
+  let available = 0
+  let registry = 0
   let buf = ''
   let inOffers = false
   for await (const chunk of source) {
@@ -128,11 +141,16 @@ export async function parseFeed(source: AsyncIterable<string | Buffer>): Promise
     while ((end = buf.indexOf('</offer>')) >= 0) {
       offers++
       const item = parseOffer(buf.slice(0, end), path)
-      if (item) items.push(item)
       buf = buf.slice(end + 8)
+      if (!item) continue
+      priced++
+      if (item.stock < 0) available++
+      if (item.in_registry) registry++
+      if (onItem) await onItem(item)
+      else items.push(item)
     }
   }
-  return { items, offers, categories: cats.size }
+  return { items, offers, categories: cats.size, priced, available, registry }
 }
 
 /** gzip — по сигнатуре 1f 8b: магазин отдаёт .yml.gz со сжатием HTTP, и fetch распаковывает его сам. */
@@ -155,19 +173,24 @@ export function feedFileStream(file: string): AsyncIterable<string> {
   return s as AsyncIterable<string>
 }
 
-/** Скачать фид во временный файл и разобрать. Таймаут — 5 минут на загрузку. */
-export async function fetchFeed(url: string): Promise<ParsedFeed> {
+/** Скачать фид во временный файл и отдать его поток. Таймаут — 5 минут на загрузку. */
+export async function withFeedUrl<T>(url: string, fn: (s: AsyncIterable<string>) => Promise<T>): Promise<T> {
   const res = await fetch(url, { signal: AbortSignal.timeout(300_000) })
   if (!res.ok || !res.body) throw new Error(`фид не скачался: HTTP ${res.status}`)
   const dir = await mkdtemp(join(tmpdir(), 'feed-'))
   const file = join(dir, 'feed')
   try {
     await pipeline(Readable.fromWeb(res.body as any), createWriteStream(file))
-    return await parseFeed(feedFileStream(file))
+    return await fn(feedFileStream(file))
   }
   finally {
     await rm(dir, { recursive: true, force: true })
   }
+}
+
+/** Файл или https-адрес фида → поток. */
+export function withFeed<T>(src: string, fn: (s: AsyncIterable<string>) => Promise<T>): Promise<T> {
+  return /^https?:\/\//.test(src) ? withFeedUrl(src, fn) : fn(feedFileStream(src))
 }
 
 /**
@@ -179,29 +202,50 @@ export function feedLooksBroken(newCount: number, currentCount: number): boolean
   return currentCount > 0 && newCount < currentCount / 2
 }
 
-/** Заменить каталог одной транзакцией: агент в это время видит старый каталог, а не пустой. */
-export async function replaceCatalog(client: pg.PoolClient, items: FeedItem[]): Promise<void> {
+const COLS = 11
+async function insertItems(client: pg.PoolClient, part: FeedItem[]): Promise<void> {
+  if (!part.length) return
+  const values: unknown[] = []
+  const rows = part.map((r, j) => {
+    values.push(r.sku, r.name, r.vendor, r.category, r.unit, r.term_months, r.price_cents.toString(), r.stock, r.in_registry, r.description, r.url)
+    return `(${Array.from({ length: COLS }, (_, k) => `$${j * COLS + k + 1}`).join(',')})`
+  })
+  await client.query(
+    `insert into catalog_items (sku, name, vendor, category, unit, term_months, price_cents, stock, in_registry, description, url)
+     values ${rows.join(',')} on conflict (sku) do nothing`,
+    values,
+  )
+}
+
+export interface LoadResult { feed: ParsedFeed; applied: boolean; current: number }
+
+/**
+ * Заменить каталог фидом одной транзакцией: агент в это время видит старый каталог, а не пустой.
+ * Позиции пишутся пачками по 500 прямо из потока. Фид оказался битым (feedLooksBroken) — откат, каталог прежний.
+ */
+export async function loadFeed(client: pg.PoolClient, source: AsyncIterable<string | Buffer>): Promise<LoadResult> {
   try {
     await client.query('begin')
+    const current = Number((await client.query('select count(*)::int as n from catalog_items')).rows[0]?.n ?? 0)
     await client.query('delete from catalog_items')
     await client.query('delete from price_rules')
-    const COLS = 11
-    for (let i = 0; i < items.length; i += 500) {
-      const part = items.slice(i, i + 500)
-      const values: unknown[] = []
-      const rows = part.map((r, j) => {
-        values.push(r.sku, r.name, r.vendor, r.category, r.unit, r.term_months, r.price_cents.toString(), r.stock, r.in_registry, r.description, r.url)
-        return `(${Array.from({ length: COLS }, (_, k) => `$${j * COLS + k + 1}`).join(',')})`
-      })
-      await client.query(
-        `insert into catalog_items (sku, name, vendor, category, unit, term_months, price_cents, stock, in_registry, description, url)
-         values ${rows.join(',')} on conflict (sku) do nothing`,
-        values,
-      )
+    let part: FeedItem[] = []
+    const feed = await parseFeed(source, async (item) => {
+      part.push(item)
+      if (part.length >= 500) {
+        await insertItems(client, part)
+        part = []
+      }
+    })
+    await insertItems(client, part)
+    if (feedLooksBroken(feed.priced, current)) {
+      await client.query('rollback')
+      return { feed, applied: false, current }
     }
     // Когда каталог обновлён — комментарием к таблице: без новой таблицы и миграции на стенде
     await client.query(`comment on table catalog_items is 'feed:${new Date().toISOString()}'`)
     await client.query('commit')
+    return { feed, applied: true, current }
   }
   catch (e) {
     await client.query('rollback')
@@ -210,6 +254,5 @@ export async function replaceCatalog(client: pg.PoolClient, items: FeedItem[]): 
 }
 
 export function feedSummary(f: ParsedFeed): string {
-  const avail = f.items.filter(i => i.stock < 0).length
-  return `категорий: ${f.categories}, позиций в фиде: ${f.offers}, загружено с ценой: ${f.items.length} (в наличии ${avail}), в реестре ПО: ${f.items.filter(i => i.in_registry).length}`
+  return `категорий: ${f.categories}, позиций в фиде: ${f.offers}, загружено с ценой: ${f.priced} (в наличии ${f.available}), в реестре ПО: ${f.registry}`
 }

@@ -1,6 +1,6 @@
 /**
  * Быстрый прогон нескольких вопросов из eval/questions.json на выбранной модели.
- * npx tsx scripts/try-llm.ts <gateway|anthropic|ollama> <модель|-> q03 q09 ...
+ * npx tsx scripts/try-llm.ts <ollama|gateway> <модель|-> q03 q09 ...
  * Печатает время, шаги, инструменты, сверку чисел, эскалацию и начало ответа.
  */
 import { readFileSync, existsSync } from 'node:fs'

@@ -27,15 +27,8 @@ export default defineNuxtConfig({
   },
   runtimeConfig: {
     databaseUrl: '',
-    // Модель агента (OpenAI-совместимый шлюз: RouterAI / OpenRouter / Ollama).
-    llmBaseUrl: 'https://routerai.ru/api/v1',
-    llmApiKey: '',
-    llmModel: 'anthropic/claude-haiku-5.5',
-    llmModelStrong: 'anthropic/claude-sonnet-5.5',
-    // Прямой Anthropic (если задан ключ — используется он).
-    anthropicApiKey: '',
-    anthropicBaseUrl: 'https://api.anthropic.com',
-    anthropicModel: 'claude-haiku-5-5',
+    // Модель агента — только открытые веса; выбор в server/agent/llm.ts по NUXT_LLM_PROVIDER / NUXT_OLLAMA_MODEL
+    // (по умолчанию Ollama, qwen3.5:9b). Шлюз — NUXT_LLM_BASE_URL + NUXT_LLM_API_KEY + NUXT_LLM_MODEL.
     // Эмбеддинги: OpenAI-совместимый /embeddings (Ollama локально по умолчанию — ПДн не уходят наружу).
     embedBaseUrl: 'http://localhost:11434/v1',
     embedApiKey: '',
