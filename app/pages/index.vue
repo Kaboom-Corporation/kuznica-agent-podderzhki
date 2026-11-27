@@ -127,7 +127,22 @@ function restart() {
   store(null)
 }
 
+// Поле ввода растёт под текст до потолка из CSS, дальше листается внутри
+const ta = ref<HTMLTextAreaElement | null>(null)
+function fitComposer() {
+  const el = ta.value
+  if (!el) return
+  el.style.height = 'auto'
+  el.style.height = `${el.scrollHeight + 2}px`
+}
+watch(text, () => nextTick(fitComposer))
+// После ответа курсор возвращается в поле, кроме телефона: там не открываем клавиатуру сами
+watch(busy, (b) => {
+  if (!b && ta.value && matchMedia('(hover: hover)').matches) ta.value.focus()
+})
+
 function onKey(e: KeyboardEvent) {
+  if (e.isComposing) return
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault()
     send()
@@ -273,12 +288,12 @@ onBeforeUnmount(() => {
         <p v-if="error" class="err-line" role="alert">{{ error }}</p>
         <div class="composer" :class="{ disabled: busy }">
           <textarea
+            ref="ta"
             v-model="text"
             class="composer-ta"
             rows="2"
             maxlength="4000"
-            :disabled="busy"
-            placeholder="Напишите задачу, название продукта или запросите КП…"
+            :placeholder="busy ? 'Агент отвечает — следующее сообщение можно писать сразу' : 'Напишите задачу, название продукта или запросите КП…'"
             aria-label="Сообщение"
             @keydown="onKey"
           />
@@ -554,6 +569,9 @@ onBeforeUnmount(() => {
   line-height: 1.5;
   color: var(--ink);
   outline: none;
+  min-height: 58px;
+  max-height: min(220px, 35dvh);
+  overflow-y: auto;
 }
 
 .composer-ta::placeholder {
@@ -577,5 +595,7 @@ onBeforeUnmount(() => {
 @media (max-width: 640px) {
   .chat-body { padding: 0 14px; }
   .composer-note { display: none; }
+  /* 16px — иначе iPhone приближает страницу при фокусе на поле */
+  .composer-ta { font-size: 16px; }
 }
 </style>
