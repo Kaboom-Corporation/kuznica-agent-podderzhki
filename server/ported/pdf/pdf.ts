@@ -60,14 +60,14 @@ const A4: [number, number] = [595.28, 841.89]
 const MARGIN = 48
 const BOTTOM = 70
 
-const ORANGE = rgb(1, 0.42, 0.208)
-const ORANGE_SOFT = rgb(1, 0.925, 0.88)
-const INK = rgb(0.11, 0.12, 0.15)
-const MUTED = rgb(0.42, 0.45, 0.5)
-const HAIRLINE = rgb(0.86, 0.87, 0.89)
-const ZEBRA = rgb(0.968, 0.972, 0.977)
-const CARD_BG = rgb(0.972, 0.975, 0.98)
-const WHITE = rgb(1, 1, 1)
+// Монохром под интерфейс панели: чёрный текст, серые линии, без цветных плашек.
+const INK = rgb(0.09, 0.09, 0.11)
+const MUTED = rgb(0.4, 0.42, 0.46)
+const HAIRLINE = rgb(0.85, 0.86, 0.88)
+const HEAD_BG = rgb(0.95, 0.955, 0.96)
+const CARD_BG = rgb(0.975, 0.977, 0.98)
+const DRAFT_BG = rgb(0.995, 0.965, 0.86)
+const DRAFT_INK = rgb(0.45, 0.3, 0.02)
 
 type Color = ReturnType<typeof rgb>
 
@@ -85,8 +85,7 @@ class Sheet {
 
   newPage() {
     this.page = this.doc.addPage(A4)
-    this.rect(0, A4[1] - 6, A4[0], 6, ORANGE)
-    this.y = A4[1] - 48
+    this.y = A4[1] - 52
   }
 
   ensure(height: number, onNewPage?: () => void) {
@@ -129,21 +128,26 @@ async function newSheet(): Promise<Sheet> {
   return new Sheet(doc, regular, bold)
 }
 
-function drawHeader(s: Sheet, badge: string, title: string, d: PdfDocData) {
+function drawHeader(s: Sheet, title: string, d: PdfDocData) {
   const top = s.y
-  s.text(d.seller.name, MARGIN, top - 4, 15, s.bold, INK)
-  if (d.seller.inn) s.text(`ИНН ${d.seller.inn}${d.seller.kpp ? `   КПП ${d.seller.kpp}` : ''}`, MARGIN, top - 19, 8.5, s.regular, MUTED)
+  s.text(d.seller.name, MARGIN, top, 10, s.bold, INK)
+  if (d.seller.inn) s.textRight(`ИНН ${d.seller.inn}${d.seller.kpp ? `   КПП ${d.seller.kpp}` : ''}`, s.right, top, 8.5, s.regular, MUTED)
+  s.y = top - 10
+  s.line(s.y, HAIRLINE, 0.75)
 
-  const bw = s.bold.widthOfTextAtSize(badge, 13) + 24
-  s.rect(s.right - bw, top - 20, bw, 24, ORANGE)
-  s.text(badge, s.right - bw + 12, top - 13, 13, s.bold, WHITE)
+  s.y -= 34
+  s.text(title, MARGIN, s.y, 20, s.bold, INK)
+  s.y -= 18
+  s.text(`№ ${d.number} от ${formatDateRu(d.date)}`, MARGIN, s.y, 10, s.regular, MUTED)
+  s.y -= 26
+}
 
-  s.y = top - 44
-  s.text(`${title} № ${d.number}`, MARGIN, s.y, 15, s.bold, INK)
-  s.textRight(`от ${formatDateRu(d.date)}`, s.right, s.y, 10, s.regular, MUTED)
-  s.y -= 10
-  s.line(s.y, ORANGE, 1.5)
-  s.y -= 22
+/** Подпись раздела: мелкий серый жирный заголовок и тонкая линия под ним. */
+function sectionLabel(s: Sheet, label: string) {
+  s.text(label, MARGIN, s.y, 8.5, s.bold, MUTED)
+  s.y -= 6
+  s.line(s.y, HAIRLINE, 0.5)
+  s.y -= 15
 }
 
 function drawParties(s: Sheet, d: PdfDocData, sellerLabel: string, buyerLabel: string) {
@@ -175,8 +179,7 @@ function drawParties(s: Sheet, d: PdfDocData, sellerLabel: string, buyerLabel: s
 
   const draw = (x: number, label: string, list: typeof left) => {
     s.rect(x, s.y - h, colW, h, CARD_BG)
-    s.rect(x, s.y - h, 3, h, ORANGE)
-    s.text(label.toUpperCase(), x + pad, s.y - 12, 8, s.bold, ORANGE)
+    s.text(label.toUpperCase(), x + pad, s.y - 13, 7.5, s.bold, MUTED)
     let ry = s.y - 16 - 8
     list.forEach((r, i) => {
       s.text(r.t, x + pad, ry, r.bold ? 10 : 8.5, r.bold ? s.bold : s.regular, r.bold || i === 0 ? INK : MUTED)
@@ -201,15 +204,15 @@ function drawItemsTable(s: Sheet, d: PdfDocData) {
 
   const head = () => {
     const h = 22
-    s.rect(MARGIN, s.y - h, s.contentWidth, h, ORANGE)
-    const by = s.y - h + 7
-    s.text('№', MARGIN + 8, by, 8.5, s.bold, WHITE)
-    s.text('Наименование', xName + 4, by, 8.5, s.bold, WHITE)
-    s.textRight('Кол-во', xQty + COL.qty - 4, by, 8.5, s.bold, WHITE)
-    s.text('Ед.', xUnit + 4, by, 8.5, s.bold, WHITE)
-    s.textRight('Цена', xPrice + COL.price - 4, by, 8.5, s.bold, WHITE)
-    s.textRight('Скидка', xDisc + COL.disc - 4, by, 8.5, s.bold, WHITE)
-    s.textRight('Сумма', xSum + COL.sum - 6, by, 8.5, s.bold, WHITE)
+    s.rect(MARGIN, s.y - h, s.contentWidth, h, HEAD_BG)
+    const by = s.y - h + 7.5
+    s.text('№', MARGIN + 8, by, 8, s.bold, MUTED)
+    s.text('Наименование', xName + 4, by, 8, s.bold, MUTED)
+    s.textRight('Кол-во', xQty + COL.qty - 4, by, 8, s.bold, MUTED)
+    s.text('Ед.', xUnit + 4, by, 8, s.bold, MUTED)
+    s.textRight('Цена', xPrice + COL.price - 4, by, 8, s.bold, MUTED)
+    s.textRight('Скидка', xDisc + COL.disc - 4, by, 8, s.bold, MUTED)
+    s.textRight('Сумма', xSum + COL.sum - 6, by, 8, s.bold, MUTED)
     s.y -= h
   }
   s.ensure(22 + 30)
@@ -219,7 +222,7 @@ function drawItemsTable(s: Sheet, d: PdfDocData) {
     const nameLines = wrapText(it.name, s.regular, 9, nameW - 8)
     const rowH = Math.max(24, nameLines.length * 12 + (it.sku ? 11 : 0) + 8)
     s.ensure(rowH, head)
-    if (i % 2 === 0) s.rect(MARGIN, s.y - rowH, s.contentWidth, rowH, ZEBRA)
+    if (i > 0) s.line(s.y, HAIRLINE, 0.5)
     const by = s.y - 15
     s.text(String(i + 1), MARGIN + 8, by, 9, s.regular, MUTED)
     let ny = by
@@ -235,8 +238,8 @@ function drawItemsTable(s: Sheet, d: PdfDocData) {
     s.textRight(formatRub(it.sumCents), xSum + COL.sum - 6, by, 8.5, s.bold)
     s.y -= rowH
   })
-  s.line(s.y)
-  s.y -= 16
+  s.line(s.y, INK, 0.75)
+  s.y -= 18
 }
 
 function drawTotals(s: Sheet, d: PdfDocData, totalLabel: string) {
@@ -250,14 +253,14 @@ function drawTotals(s: Sheet, d: PdfDocData, totalLabel: string) {
     s.textRight(value, s.right, s.y, 9)
     s.y -= 15
   }
-  const boxH = 34
-  s.rect(x - 8, s.y - boxH + 10, w + 8, boxH, ORANGE_SOFT)
-  s.rect(x - 8, s.y - boxH + 10, 3, boxH, ORANGE)
-  s.text(totalLabel, x + 2, s.y - 6, 9.5, s.regular, MUTED)
-  s.textRight(formatRub(d.totalCents), s.right - 8, s.y - 17, 15, s.bold, ORANGE)
-  s.y -= boxH + 4
-  s.textRight(`в т.ч. НДС ${d.vatPercent}%: ${formatRub(d.vatCents)}`, s.right, s.y, 9, s.regular, INK)
-  s.y -= 18
+  s.y += 4
+  s.page.drawLine({ start: { x, y: s.y }, end: { x: s.right, y: s.y }, thickness: 0.5, color: HAIRLINE })
+  s.y -= 20
+  s.text(totalLabel, x, s.y, 11, s.bold, INK)
+  s.textRight(formatRub(d.totalCents), s.right, s.y - 1, 16, s.bold, INK)
+  s.y -= 16
+  s.textRight(`в т.ч. НДС ${d.vatPercent}%: ${formatRub(d.vatCents)}`, s.right, s.y, 9, s.regular, MUTED)
+  s.y -= 22
   s.paragraph(`Всего наименований ${d.items.length}, на сумму ${formatRub(d.totalCents)}`, MARGIN, 9, s.contentWidth, MUTED)
   s.paragraph(amountInWords(d.totalCents), MARGIN, 10, s.contentWidth, INK)
   s.y -= 10
@@ -279,17 +282,14 @@ function drawSignature(s: Sheet, d: PdfDocData, role: string) {
 /** Счёт на оплату: реквизиты продавца и банка, позиции, итоги, «в т.ч. НДС», сумма прописью. */
 export async function generateInvoicePdf(d: PdfDocData): Promise<Uint8Array> {
   const s = await newSheet()
-  drawHeader(s, 'СЧЁТ', 'Счёт на оплату', d)
+  drawHeader(s, 'Счёт на оплату', d)
   drawParties(s, d, 'Поставщик', 'Покупатель')
   drawItemsTable(s, d)
   drawTotals(s, d, 'Итого к оплате')
 
   // Реквизиты для оплаты — не выдумываем: нет значения, рисуем линию для заполнения.
   s.ensure(110)
-  s.text('РЕКВИЗИТЫ ДЛЯ ОПЛАТЫ', MARGIN, s.y, 8.5, s.bold, ORANGE)
-  s.y -= 6
-  s.line(s.y, HAIRLINE, 0.5)
-  s.y -= 15
+  sectionLabel(s, 'РЕКВИЗИТЫ ДЛЯ ОПЛАТЫ')
   const reqRow = (label: string, value?: string) => {
     s.ensure(15)
     s.text(label, MARGIN, s.y, 9, s.regular, MUTED)
@@ -313,7 +313,7 @@ export async function generateInvoicePdf(d: PdfDocData): Promise<Uint8Array> {
   if (s.y === savedY) s.y -= 13
   if (d.validUntil) {
     s.y -= 4
-    s.text(`Оплатить до ${formatDateRu(d.validUntil)}`, MARGIN, s.y, 10, s.bold, ORANGE)
+    s.text(`Оплатить до ${formatDateRu(d.validUntil)}`, MARGIN, s.y, 10, s.bold, INK)
     s.y -= 18
   }
   if (d.notes) {
@@ -328,16 +328,17 @@ export async function generateInvoicePdf(d: PdfDocData): Promise<Uint8Array> {
 /** Коммерческое предложение: позиции и итоги, срок действия, условия, примечания. */
 export async function generateProposalPdf(d: PdfDocData): Promise<Uint8Array> {
   const s = await newSheet()
-  drawHeader(s, 'КП', 'Коммерческое предложение', d)
+  drawHeader(s, 'Коммерческое предложение', d)
   if (d.draftMark) {
-    s.rect(MARGIN, s.y - 18, s.contentWidth, 26, ORANGE_SOFT)
-    s.rect(MARGIN, s.y - 18, 3, 26, ORANGE)
-    s.text(d.draftMark, MARGIN + 12, s.y - 9, 10, s.bold, ORANGE)
-    s.y -= 40
+    // Пометку видно сразу: жёлтая плашка с тёмным текстом, как предупреждение в панели.
+    s.rect(MARGIN, s.y - 20, s.contentWidth, 28, DRAFT_BG)
+    s.text(d.draftMark, MARGIN + 12, s.y - 10, 10, s.bold, DRAFT_INK)
+    s.textRight('без подписи и печати', s.right - 12, s.y - 10, 8.5, s.regular, DRAFT_INK)
+    s.y -= 42
   }
   drawParties(s, d, 'Исполнитель', 'Заказчик')
   if (d.validUntil) {
-    s.text(`Предложение действительно до ${formatDateRu(d.validUntil)}`, MARGIN, s.y, 10, s.bold, ORANGE)
+    s.text(`Предложение действительно до ${formatDateRu(d.validUntil)}`, MARGIN, s.y, 9.5, s.regular, MUTED)
     s.y -= 20
   }
   drawItemsTable(s, d)
@@ -345,10 +346,7 @@ export async function generateProposalPdf(d: PdfDocData): Promise<Uint8Array> {
 
   if (d.terms?.length) {
     s.ensure(40)
-    s.text('УСЛОВИЯ', MARGIN, s.y, 8.5, s.bold, ORANGE)
-    s.y -= 6
-    s.line(s.y, HAIRLINE, 0.5)
-    s.y -= 15
+    sectionLabel(s, 'УСЛОВИЯ')
     d.terms.forEach((t, i) => {
       s.paragraph(`${i + 1}. ${t}`, MARGIN, 9.5, s.contentWidth, INK)
     })
@@ -356,10 +354,7 @@ export async function generateProposalPdf(d: PdfDocData): Promise<Uint8Array> {
   }
   if (d.notes) {
     s.ensure(40)
-    s.text('ПРИМЕЧАНИЯ', MARGIN, s.y, 8.5, s.bold, ORANGE)
-    s.y -= 6
-    s.line(s.y, HAIRLINE, 0.5)
-    s.y -= 15
+    sectionLabel(s, 'ПРИМЕЧАНИЯ')
     s.paragraph(d.notes, MARGIN, 9.5, s.contentWidth, INK)
     s.y -= 8
   }
