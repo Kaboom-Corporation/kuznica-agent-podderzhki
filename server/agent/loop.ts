@@ -16,6 +16,7 @@ import { analogQuery, clarifyFirst, selectionQueries } from './catalog-search'
 import { TOOL_DEFS, runTool, type Turn, type Source, type Draft, type Escalation } from './tools'
 import { suggestNext } from './suggest'
 import { deferralAsk, discountAsk, GOODWILL_PCT } from './money-asks'
+import { pageSku, titleHint, type PageInput } from './page'
 import { absorbQuestion, admitsNoAnswer, checkActions, checkRegistry, describe, emptyFacts, verifyAnswer, type Verdict } from './verify'
 
 export const MAX_STEPS = 8
@@ -44,8 +45,8 @@ export interface AskInput {
   text: string
   customer?: { name?: string; email?: string; company?: string }
   subject?: string
-  /** Карточка товара, открытая на витрине, пока клиент пишет: код подкладывает её в контекст */
-  page?: { sku: string }
+  /** Страница, открытая на витрине или на сайте с виджетом, пока клиент пишет: карточку код подкладывает в контекст (см. page.ts) */
+  page?: PageInput
   llm?: Llm
   today?: Date
 }
@@ -122,16 +123,19 @@ export async function ask(input: AskInput): Promise<AgentReply> {
   // Клиент пишет со страницы товара: карточку открывает код, чтобы «а это подойдёт?» и «сколько стоит?»
   // модель понимала без переспросов, а цену брала из каталога (результат инструмента проходит сверку).
   let pageHint = ''
-  if (input.page?.sku) {
-    const call = { id: 'auto-page', type: 'function' as const, function: { name: 'check_stock', arguments: JSON.stringify({ query: input.page.sku }) } }
-    const res = await runTool('check_stock', { query: input.page.sku }, t) as { items?: { sku: string; name: string }[] }
-    const item = res?.items?.find(i => i.sku.toUpperCase() === input.page!.sku.toUpperCase())
+  const cardSku = await pageSku(input.page)
+  if (cardSku) {
+    const call = { id: 'auto-page', type: 'function' as const, function: { name: 'check_stock', arguments: JSON.stringify({ query: cardSku }) } }
+    const res = await runTool('check_stock', { query: cardSku }, t) as { items?: { sku: string; name: string }[] }
+    const item = res?.items?.find(i => i.sku.toUpperCase() === cardSku.toUpperCase())
     if (item) {
       msgs.push({ role: 'assistant', content: '', tool_calls: [call] })
       msgs.push({ role: 'tool', tool_call_id: call.id, name: 'check_stock', content: toJson(res) })
       pageHint = ` Клиент сейчас смотрит карточку товара ${item.sku} «${item.name}» (она выше в check_stock). «Это», «он», «сколько стоит», «подойдёт ли» без другого названия — про неё. Если спрашивает о другом товаре — ищи его как обычно.`
     }
   }
+  // Страница продукта или раздела без карточки (или карточки нет в фиде): хватает заголовка.
+  if (!pageHint && input.page?.title) pageHint = titleHint(input.page.title)
 
   // Скидка и отсрочка: что можно агенту, решает код (см. money-asks.ts).
   const discount = discountAsk(maskedQuestion)
