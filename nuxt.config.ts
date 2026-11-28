@@ -14,6 +14,10 @@ export default defineNuxtConfig({
     },
   },
   css: ['~/assets/ui.css'],
+  routeRules: {
+    // виджет подключают чужие сайты (public/widget.js): короткий кэш, чтобы выкатка доходила до них за минуты
+    '/widget.js': { headers: { 'cache-control': 'public, max-age=300' } },
+  },
   nitro: {
     // Шрифты для PDF счёта/КП кладём в серверные ассеты (useStorage('assets:fonts')).
     serverAssets: [{ baseName: 'fonts', dir: './assets/fonts' }],

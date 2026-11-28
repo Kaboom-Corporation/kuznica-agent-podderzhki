@@ -15,8 +15,12 @@ interface Msg {
   /** у ответа: кнопки следующего вопроса */
   suggestions?: string[]
 }
-/** Страница, которую клиент сейчас смотрит (карточка товара на витрине): агент получает её в контексте */
-export interface ChatPage { sku: string; name: string }
+/**
+ * Страница, которую клиент сейчас смотрит: агент получает её в контексте.
+ * Витрина стенда знает артикул карточки (sku). Виджет на чужом сайте знает только адрес и название страницы;
+ * карточку по адресу находит сервер (server/agent/page.ts), а название идёт подсказкой.
+ */
+export interface ChatPage { sku?: string; url?: string; name: string }
 
 const props = defineProps<{ page?: ChatPage | null; starters?: string[]; title?: string; intro?: string; dock?: boolean }>()
 
@@ -135,7 +139,7 @@ async function send(q?: string) {
   if (!value || busy.value) return
   error.value = ''
   const page = props.page ?? null
-  const mine: Msg = { role: 'user', content: value, about: page?.name }
+  const mine: Msg = { role: 'user', content: value, about: page ? `${page.sku ? 'о товаре' : 'со страницы'}: ${page.name}` : undefined }
   messages.value.push(mine)
   text.value = ''
   piiHint.value = PII_HINT.test(value)
@@ -145,7 +149,7 @@ async function send(q?: string) {
   try {
     const r = await $fetch<{ conversationId: string; text: string; sources: Source[]; drafts: Draft[]; escalated: boolean; pii?: number; suggestions?: string[] }>('/api/chat', {
       method: 'POST',
-      body: { text: value, conversationId: conversationId.value ?? undefined, page: page ? { sku: page.sku } : undefined },
+      body: { text: value, conversationId: conversationId.value ?? undefined, page: page ? (page.sku ? { sku: page.sku } : { url: page.url, title: page.name }) : undefined },
     })
     conversationId.value = r.conversationId
     store(r.conversationId)
@@ -155,7 +159,10 @@ async function send(q?: string) {
     messages.value.push({ role: 'assistant', content: r.text, sources: r.sources, drafts: r.drafts, escalated: r.escalated, suggestions: r.suggestions ?? [] })
     if (r.escalated || r.drafts.length) startPolling()
   } catch (e: any) {
-    error.value = e?.data?.statusMessage || e?.statusMessage || 'Не получилось отправить. Попробуйте ещё раз.'
+    // 4xx — наши тексты (лимит, пустое сообщение); у 5xx statusMessage служебный («Server Error»), клиенту его не показываем
+    const status = Number(e?.statusCode ?? e?.status ?? 0)
+    const own = status >= 400 && status < 500 ? (e?.data?.statusMessage || e?.statusMessage) : ''
+    error.value = own || 'Не получилось отправить. Попробуйте ещё раз.'
     messages.value.pop()
     text.value = value
   } finally {
@@ -279,7 +286,7 @@ defineExpose({ restart, messages, busy })
       <!-- User -->
       <div v-if="m.role === 'user'" class="user-msg">
         {{ m.content }}
-        <span v-if="m.about" class="user-about">о товаре: {{ m.about }}</span>
+        <span v-if="m.about" class="user-about">{{ m.about }}</span>
       </div>
 
       <!-- Assistant / Manager -->
@@ -361,7 +368,7 @@ defineExpose({ restart, messages, busy })
 
   <!-- Linear Integrated Composer -->
   <footer class="composer-area">
-    <p v-if="page" class="page-chip" title="Консультант видит эту карточку и отвечает про неё, если вы не назвали другой товар">
+    <p v-if="page" class="page-chip" :title="page.sku ? 'Консультант видит эту карточку и отвечает про неё, если вы не назвали другой товар' : 'Консультант видит, с какой страницы магазина вы пишете: если товар не назван, он ищет продукт с этой страницы'">
       <span class="status-dot accent" aria-hidden="true" />
       <span>Смотрите: <b>{{ page.name }}</b></span>
     </p>
