@@ -53,6 +53,10 @@ export default defineNuxtConfig({
     feedUrl: '',
     // Распознавание речи — своя модель (OpenAI-совместимый /v1/audio/transcriptions). Пусто = диктовка выключена.
     asrUrl: '',
+    // Канал Telegram: пустой токен = канал выключен. Секрет вебхука обязателен, адрес API — свой прокси или официальный.
+    telegramBotToken: '',
+    telegramWebhookSecret: '',
+    telegramApiUrl: 'https://api.telegram.org',
     public: {
       shopName: 'Демо Софт — магазин лицензий',
       // Виджет сбора замечаний для внутренней проверки стенда. Пусто = выключен.

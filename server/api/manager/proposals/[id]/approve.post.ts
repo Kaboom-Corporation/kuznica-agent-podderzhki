@@ -2,6 +2,7 @@ import { sendMail } from '../../../../ported/email/smtp'
 import { q, q1 } from '../../../../lib/db'
 import { loadProposal, proposalMail, proposalPdf } from '../../../../lib/documents'
 import { requireManager, uuidParam } from '../../../../lib/guard'
+import { sendProposalToTelegram } from '../../../../lib/telegram-bot'
 
 /**
  * Менеджер подтверждает КП: статус approved → PDF → запись в outbox → письмо, если настроен SMTP и есть адрес.
@@ -37,14 +38,17 @@ export default defineEventHandler(async (event) => {
     `insert into outbox (conversation_id, to_email, subject, body, attachments, status, error) values ($1, $2, $3, $4, $5, $6, $7)`,
     [p.conversation_id, to || '—', mail.subject, text, JSON.stringify([{ filename, bytes: pdf.length }]), status, error],
   )
-  if (status === 'sent') await q(`update proposals set status = 'sent', sent_at = now() where id = $1`, [id])
+  // Обращение из Telegram: PDF уходит и в чат клиента. Ошибка доставки подтверждение не отменяет.
+  const telegram = p.conversation_id ? await sendProposalToTelegram(p.conversation_id, p.number, pdf, body?.note) : null
+  if (status === 'sent' || telegram === 'sent') await q(`update proposals set status = 'sent', sent_at = now() where id = $1`, [id])
   if (p.conversation_id) {
+    const where = [status === 'sent' ? 'на почту' : '', telegram === 'sent' ? 'в Telegram' : ''].filter(Boolean).join(' и ')
     await q(`insert into messages (conversation_id, role, content, meta) values ($1, 'manager', $2, $3)`, [
       p.conversation_id,
-      status === 'sent' ? `Менеджер проверил и отправил КП ${p.number} на почту.` : `Менеджер проверил КП ${p.number}.`,
-      JSON.stringify({ proposal: p.number, outbox: status }),
+      where ? `Менеджер проверил и отправил КП ${p.number} ${where}.` : `Менеджер проверил КП ${p.number}.`,
+      JSON.stringify({ proposal: p.number, outbox: status, telegram }),
     ])
     await q(`update conversations set status = 'open', updated_at = now() where id = $1`, [p.conversation_id])
   }
-  return { number: p.number, status: status === 'sent' ? 'sent' : 'approved', mail: status, error }
+  return { number: p.number, status: status === 'sent' || telegram === 'sent' ? 'sent' : 'approved', mail: status, telegram, error }
 })

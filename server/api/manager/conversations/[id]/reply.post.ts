@@ -1,6 +1,7 @@
 import { q, q1 } from '../../../../lib/db'
 import { requireManager, uuidParam } from '../../../../lib/guard'
 import { learnFromManager } from '../../../../lib/learn'
+import { notifyTelegram } from '../../../../lib/telegram-bot'
 
 /**
  * Ответ менеджера в диалог (после эскалации). Клиент увидит его в истории чата; эскалации диалога закрываются.
@@ -24,6 +25,8 @@ export default defineEventHandler(async (event) => {
   await q(`insert into messages (conversation_id, role, content) values ($1, 'manager', $2)`, [id, text])
   await q('update escalations set resolved = true where conversation_id = $1 and not resolved', [id])
   await q(`update conversations set status = 'open', updated_at = now() where id = $1`, [id])
+  // Обращение из Telegram — ответ уходит и в чат клиента. Не дошло — в журнал, ответ в панели уже сохранён.
+  const telegram = await notifyTelegram(id, text)
 
   let learned = null
   // Только по явной отметке менеджера: ответ про конкретный заказ другому клиенту показывать нельзя
@@ -35,5 +38,5 @@ export default defineEventHandler(async (event) => {
       console.warn(`ответ менеджера не попал в базу знаний: ${(e as Error).message}`)
     }
   }
-  return { ok: true, learned }
+  return { ok: true, learned, telegram }
 })
