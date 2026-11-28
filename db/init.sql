@@ -74,7 +74,7 @@ CREATE TABLE IF NOT EXISTS price_rules (
 -- Диалоги и сообщения (чат и почта)
 CREATE TABLE IF NOT EXISTS conversations (
   id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  channel       text NOT NULL,              -- 'chat' | 'email'
+  channel       text NOT NULL,              -- 'chat' | 'email' | 'telegram'
   customer_name text,
   customer_email text,
   customer_company text,
@@ -156,6 +156,23 @@ CREATE TABLE IF NOT EXISTS escalations (
   reason          text NOT NULL,
   resolved        boolean NOT NULL DEFAULT false,
   created_at      timestamptz NOT NULL DEFAULT now()
+);
+
+-- Telegram: обращение помнит свой чат, чтобы ответ менеджера и подтверждённое КП дошли клиенту
+ALTER TABLE conversations ADD COLUMN IF NOT EXISTS telegram_chat_id bigint;
+CREATE INDEX IF NOT EXISTS conversations_tg_chat ON conversations (telegram_chat_id) WHERE telegram_chat_id IS NOT NULL;
+
+-- Текущее обращение чата: новые сообщения продолжают его, /new начинает новое
+CREATE TABLE IF NOT EXISTS telegram_chats (
+  chat_id         bigint PRIMARY KEY,
+  conversation_id uuid REFERENCES conversations(id) ON DELETE SET NULL,
+  updated_at      timestamptz NOT NULL DEFAULT now()
+);
+
+-- Уже принятые обновления вебхука: Telegram может прислать одно и то же повторно
+CREATE TABLE IF NOT EXISTS telegram_updates (
+  update_id       bigint PRIMARY KEY,
+  received_at     timestamptz NOT NULL DEFAULT now()
 );
 
 -- Исходящая почта (журнал: если SMTP не настроен, письмо всё равно видно в панели)

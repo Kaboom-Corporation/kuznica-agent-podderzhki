@@ -1,3 +1,4 @@
+import { transcribe } from '../lib/asr'
 import { rateLimit } from '../lib/guard'
 
 /**
@@ -28,17 +29,8 @@ export default defineEventHandler(async (event) => {
   const type = audio.type || 'application/octet-stream'
   if (!/^(audio|video)\//.test(type)) throw createError({ statusCode: 415, statusMessage: 'Это не аудио' })
 
-  const ext = type.includes('mp4') ? 'mp4' : type.includes('ogg') ? 'ogg' : type.includes('wav') ? 'wav' : 'webm'
-  const form = new FormData()
-  form.append('file', new Blob([new Uint8Array(audio.data)], { type }), `voice.${ext}`)
-  form.append('language', 'ru')
-  form.append('response_format', 'json')
-
   try {
-    const r = await $fetch<{ text?: string }>(`${base}/v1/audio/transcriptions`, {
-      method: 'POST', body: form, timeout: 60_000,
-    })
-    return { text: String(r?.text || '').trim() }
+    return { text: await transcribe(base, audio.data, type) }
   } catch (e: any) {
     console.error('[asr]', e?.status || '', e?.message || e)
     throw createError({ statusCode: 502, statusMessage: 'Не получилось распознать речь — напишите текстом' })

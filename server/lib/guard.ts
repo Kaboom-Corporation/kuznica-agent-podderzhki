@@ -33,17 +33,27 @@ let global: number[] = []
 const MAX_KEYS = 5000
 /** bucket — отдельный счётчик на адрес (диктовка не съедает лимит сообщений); общий потолок процесса — один. */
 export function rateLimit(event: H3Event, perMinute = 12, globalPerMinute = Number(process.env.NUXT_CHAT_GLOBAL_PER_MIN) || 120, bucket = ''): void {
+  const over = takeSlot(bucket + clientIp(event), perMinute, globalPerMinute)
+  if (over === 'global') throw createError({ statusCode: 429, statusMessage: 'Помощник сейчас перегружен, попробуйте через минуту' })
+  if (over === 'key') throw createError({ statusCode: 429, statusMessage: 'Слишком много сообщений, подождите минуту' })
+}
+
+/**
+ * Тот же лимит по произвольному ключу (Telegram: чат вместо адреса). Общий потолок процесса — один на все каналы.
+ * null — можно; 'key' — превышен лимит ключа; 'global' — перегружен весь процесс.
+ */
+export function takeSlot(key: string, perMinute = 12, globalPerMinute = Number(process.env.NUXT_CHAT_GLOBAL_PER_MIN) || 120): 'key' | 'global' | null {
   const now = Date.now()
   global = global.filter(t => now - t < 60_000)
-  if (global.length >= globalPerMinute) throw createError({ statusCode: 429, statusMessage: 'Помощник сейчас перегружен, попробуйте через минуту' })
-  const ip = bucket + clientIp(event)
-  const list = (hits.get(ip) || []).filter(t => now - t < 60_000)
-  if (list.length >= perMinute) throw createError({ statusCode: 429, statusMessage: 'Слишком много сообщений, подождите минуту' })
+  if (global.length >= globalPerMinute) return 'global'
+  const list = (hits.get(key) || []).filter(t => now - t < 60_000)
+  if (list.length >= perMinute) return 'key'
   list.push(now)
   global.push(now)
-  hits.delete(ip)
-  hits.set(ip, list) // Map хранит порядок вставки: в начале — самые давние адреса
+  hits.delete(key)
+  hits.set(key, list) // Map хранит порядок вставки: в начале — самые давние ключи
   while (hits.size > MAX_KEYS) hits.delete(hits.keys().next().value!)
+  return null
 }
 
 export function uuidParam(event: H3Event, name = 'id'): string {

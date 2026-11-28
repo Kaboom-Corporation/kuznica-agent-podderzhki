@@ -524,14 +524,14 @@ onBeforeUnmount(() => {
               <span class="status-dot issue-dot" :class="rowDot(r)" aria-hidden="true" />
               <div class="issue-main">
                 <div class="issue-top">
-                  <span class="issue-title">{{ r.customer_company || r.subject || (r.channel === 'email' ? 'Почта' : 'Веб-чат') }}</span>
+                  <span class="issue-title">{{ r.customer_company || r.subject || (r.channel === 'email' ? 'Почта' : r.channel === 'telegram' ? 'Telegram' : 'Веб-чат') }}</span>
                   <span class="issue-time num">{{ time(r.updated_at) }}</span>
                 </div>
                 <p class="issue-preview">{{ r.last_question || r.subject || 'Без текста' }}</p>
                 <div class="issue-sub">
                   <span v-if="r.draft_proposals">КП: {{ r.draft_proposals }}</span>
                   <span v-if="r.open_escalations">Эскалация</span>
-                  <span>{{ r.channel === 'email' ? 'почта' : 'чат' }}</span>
+                  <span>{{ r.channel === 'email' ? 'почта' : r.channel === 'telegram' ? 'Telegram' : 'чат' }}</span>
                   <span class="num">{{ fmtRub(r.cost_rub) }}</span>
                 </div>
               </div>

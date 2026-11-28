@@ -13,6 +13,7 @@
     "ingest:feed": "tsx scripts/ingest-feed.ts",
     "try": "tsx scripts/try-llm.ts",
     "eval": "tsx scripts/eval.ts",
+    "telegram:webhook": "tsx scripts/telegram-webhook.ts",
     "test": "vitest run",
     "typecheck": "tsgo --noEmit -p tsconfig.json"
   },

@@ -35,7 +35,7 @@ export interface AgentReply {
 
 export interface AskInput {
   conversationId?: string
-  channel: 'chat' | 'email'
+  channel: 'chat' | 'email' | 'telegram'
   text: string
   customer?: { name?: string; email?: string; company?: string }
   subject?: string
