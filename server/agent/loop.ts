@@ -39,6 +39,8 @@ export interface AskInput {
   text: string
   customer?: { name?: string; email?: string; company?: string }
   subject?: string
+  /** Карточка товара, открытая на витрине, пока клиент пишет: код подкладывает её в контекст */
+  page?: { sku: string }
   llm?: Llm
   today?: Date
 }
@@ -112,6 +114,20 @@ export async function ask(input: AskInput): Promise<AgentReply> {
       msgs.push({ role: 'tool', tool_call_id: calls[i]!.id, name: 'check_stock', content: toJson(await runTool('check_stock', { query }, t)) })
   }
 
+  // Клиент пишет со страницы товара: карточку открывает код, чтобы «а это подойдёт?» и «сколько стоит?»
+  // модель понимала без переспросов, а цену брала из каталога (результат инструмента проходит сверку).
+  let pageHint = ''
+  if (input.page?.sku) {
+    const call = { id: 'auto-page', type: 'function' as const, function: { name: 'check_stock', arguments: JSON.stringify({ query: input.page.sku }) } }
+    const res = await runTool('check_stock', { query: input.page.sku }, t) as { items?: { sku: string; name: string }[] }
+    const item = res?.items?.find(i => i.sku.toUpperCase() === input.page!.sku.toUpperCase())
+    if (item) {
+      msgs.push({ role: 'assistant', content: '', tool_calls: [call] })
+      msgs.push({ role: 'tool', tool_call_id: call.id, name: 'check_stock', content: toJson(res) })
+      pageHint = ` Клиент сейчас смотрит карточку товара ${item.sku} «${item.name}» (она выше в check_stock). «Это», «он», «сколько стоит», «подойдёт ли» без другого названия — про неё. Если спрашивает о другом товаре — ищи его как обычно.`
+    }
+  }
+
   // Скидка и отсрочка: что можно агенту, решает код (см. money-asks.ts).
   const discount = discountAsk(maskedQuestion)
   const money: { name: string; args: Record<string, unknown> }[] = []
@@ -143,7 +159,7 @@ export async function ask(input: AskInput): Promise<AgentReply> {
     try {
       res = await llm.provider.complete(msgs, {
         system,
-        systemTail: systemTail(today) + moneyHint + (clarify ? ' Клиент не знает, что ему нужно: сейчас ответь только 2–3 короткими уточняющими вопросами, без товаров и цен.' : ''),
+        systemTail: systemTail(today) + moneyHint + pageHint + (clarify ? ' Клиент не знает, что ему нужно: сейчас ответь только 2–3 короткими уточняющими вопросами, без товаров и цен.' : ''),
         cacheSystem: true,
         ...(clarify ? {} : { tools: TOOL_DEFS as any }),
         gatewayModel: llm.model,
