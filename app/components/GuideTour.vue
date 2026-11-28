@@ -290,13 +290,17 @@ defineExpose({ start })
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 8px;
   margin-top: 14px;
 }
 
+/* длинная подпись последней кнопки («Дальше: панель менеджера») не влезала в 340px — навигация уходит на строку ниже, вправо */
 .tour-nav {
   display: flex;
   gap: 6px;
+  margin-left: auto;
+  min-width: 0;
 }
 
 .tour-dots {

@@ -3,7 +3,18 @@ import { renderMd } from '~/utils/md'
 
 interface Source { slug: string; title: string; heading: string | null }
 interface Draft { kind: 'proposal' | 'invoice'; id: string; number: string; total: string }
-interface Msg { role: 'user' | 'assistant' | 'manager'; content: string; sources?: Source[]; drafts?: Draft[]; escalated?: boolean; about?: string }
+interface Msg {
+  role: 'user' | 'assistant' | 'manager'
+  content: string
+  sources?: Source[]
+  drafts?: Draft[]
+  escalated?: boolean
+  about?: string
+  /** у реплики клиента: сколько ПДн спрятано от модели (0 — ничего, отметку не показываем) */
+  pii?: number
+  /** у ответа: кнопки следующего вопроса */
+  suggestions?: string[]
+}
 /** Страница, которую клиент сейчас смотрит (карточка товара на витрине): агент получает её в контексте */
 export interface ChatPage { sku: string; name: string }
 
@@ -39,8 +50,13 @@ const defaultStarters = [
 ]
 const starters = computed(() => props.starters ?? defaultStarters)
 
+// «Маскирую ПДн» — только когда в тексте похоже на ПДн (телефон, почта, длинные номера, ФИО),
+// иначе жюри видит маскировку на вопросе, где прятать нечего. Точный счёт приходит с сервера.
+const PII_HINT = /@|\+?\d[\d\s()-]{9,}\d|\b\d{10,}\b|[А-ЯЁ][а-яё]+\s+[А-ЯЁ][а-яё]+(?:вич|вна|ична)\b/
+const piiHint = ref(false)
+
 const waitStage = computed(() => {
-  if (elapsedSec.value < 5) return 'Маскирую персональные данные…'
+  if (elapsedSec.value < 5) return piiHint.value ? 'Маскирую персональные данные…' : 'Читаю вопрос…'
   if (elapsedSec.value < 15) return 'Ищу в каталоге и базе знаний…'
   if (elapsedSec.value < 30) return 'Подбираю варианты и рассчитываю цены…'
   return 'Сверяю цифры с каталогом…'
@@ -98,19 +114,24 @@ async function send(q?: string) {
   if (!value || busy.value) return
   error.value = ''
   const page = props.page ?? null
-  messages.value.push({ role: 'user', content: value, about: page?.name })
+  const mine: Msg = { role: 'user', content: value, about: page?.name }
+  messages.value.push(mine)
   text.value = ''
+  piiHint.value = PII_HINT.test(value)
   busy.value = true
   startWaitTimer()
   scrollDown()
   try {
-    const r = await $fetch<{ conversationId: string; text: string; sources: Source[]; drafts: Draft[]; escalated: boolean }>('/api/chat', {
+    const r = await $fetch<{ conversationId: string; text: string; sources: Source[]; drafts: Draft[]; escalated: boolean; pii?: number; suggestions?: string[] }>('/api/chat', {
       method: 'POST',
       body: { text: value, conversationId: conversationId.value ?? undefined, page: page ? { sku: page.sku } : undefined },
     })
     conversationId.value = r.conversationId
     store(r.conversationId)
-    messages.value.push({ role: 'assistant', content: r.text, sources: r.sources, drafts: r.drafts, escalated: r.escalated })
+    // реактивная копия, а не mine: иначе Vue не заметит новое поле
+    const u = messages.value.findLast(m => m.role === 'user')
+    if (u) u.pii = r.pii ?? 0
+    messages.value.push({ role: 'assistant', content: r.text, sources: r.sources, drafts: r.drafts, escalated: r.escalated, suggestions: r.suggestions ?? [] })
     if (r.escalated || r.drafts.length) startPolling()
   } catch (e: any) {
     error.value = e?.data?.statusMessage || e?.statusMessage || 'Не получилось отправить. Попробуйте ещё раз.'
@@ -276,7 +297,20 @@ defineExpose({ restart, messages, busy })
             <template v-if="idx > 0"> · </template>{{ s.title }}<template v-if="s.heading"> ({{ s.heading }})</template>
           </span>
         </div>
+
+        <!-- Следующий вопрос: только под последним ответом, пока агент не занят -->
+        <div v-if="m.suggestions?.length && i === messages.length - 1 && !busy" class="next-asks" role="group" aria-label="Можно спросить дальше">
+          <button v-for="s in m.suggestions" :key="s" type="button" class="next-ask" @click="send(s)">{{ s }}</button>
+        </div>
       </div>
+
+      <!-- После v-if/v-else, иначе разрывает цепочку и реплика клиента рисуется ещё и ответом -->
+      <p v-if="m.role === 'user' && m.pii" class="pii-note" title="Имена, телефоны, почта и номера документов заменены метками до отправки модели и возвращены в ответ уже у нас">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M12 3 4.5 6v5.5c0 4.6 3.2 8.4 7.5 9.5 4.3-1.1 7.5-4.9 7.5-9.5V6L12 3Z" />
+        </svg>
+        Скрыто персональных данных: {{ m.pii }} — модель их не видела
+      </p>
     </article>
 
     <!-- Minimal Spinner Wait Indicator -->
@@ -725,6 +759,55 @@ defineExpose({ restart, messages, busy })
   margin-top: 4px;
   font-size: 11.5px;
   color: var(--ink-3);
+}
+
+.pii-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin: 5px 2px 0;
+  font-size: 11.5px;
+  color: var(--ink-3);
+}
+
+.pii-note svg {
+  width: 13px;
+  height: 13px;
+  flex: none;
+  color: var(--dot-ok);
+}
+
+.next-asks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-top: 4px;
+  animation: view-in 220ms var(--ease) both;
+}
+
+.next-ask {
+  padding: 5px 11px;
+  border-radius: 999px;
+  border: 1px solid var(--line-strong);
+  background: var(--bg);
+  color: var(--ink-2);
+  font: inherit;
+  font-size: 12.5px;
+  line-height: 1.4;
+  text-align: left;
+  cursor: pointer;
+  transition: background 120ms var(--ease), color 120ms var(--ease), border-color 120ms var(--ease);
+}
+
+.next-ask:hover {
+  background: var(--bg-chrome);
+  color: var(--ink);
+  border-color: var(--ink-4);
+}
+
+.next-ask:focus-visible {
+  outline: 2px solid var(--indigo);
+  outline-offset: 2px;
 }
 
 .page-chip {

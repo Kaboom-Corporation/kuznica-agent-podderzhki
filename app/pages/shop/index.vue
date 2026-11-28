@@ -13,18 +13,53 @@ const router = useRouter()
 const qs = computed(() => ({
   q: String(route.query.q ?? ''),
   category: String(route.query.category ?? ''),
-  page: Number(route.query.page) || 1,
 }))
+// Первая страница — через useFetch (рендерится на сервере), следующие догружаются при прокрутке
 const { data, pending, error } = useFetch<ShopResult>('/api/shop', { query: qs })
 const firstSku = useState<string | null>('shop-first', () => null)
 watch(data, d => { firstSku.value = d?.items[0]?.sku ?? null }, { immediate: true })
 
+const MAX_PAGES = 200
+const more = ref<ShopItem[]>([])
+const loaded = ref(1)
+const loadingMore = ref(false)
+const moreError = ref(false)
+watch(qs, () => { more.value = []; loaded.value = 1; moreError.value = false })
+const items = computed(() => [...(data.value?.items ?? []), ...more.value])
+const lastPage = computed(() => Math.min(data.value?.pages ?? 1, MAX_PAGES))
+const hasMore = computed(() => !!data.value && !pending.value && loaded.value < lastPage.value)
+
+async function loadMore() {
+  if (!hasMore.value || loadingMore.value) return
+  loadingMore.value = true
+  moreError.value = false
+  const want = qs.value
+  try {
+    const r = await $fetch<ShopResult>('/api/shop', { query: { ...want, page: loaded.value + 1 } })
+    if (want !== qs.value) return
+    const seen = new Set(items.value.map(i => i.sku))
+    more.value.push(...r.items.filter(i => !seen.has(i.sku)))
+    loaded.value++
+  }
+  catch { moreError.value = true }
+  finally { loadingMore.value = false }
+}
+
+// Датчик у нижнего края: подгружаем заранее, за экран до конца списка
+const sentinel = ref<HTMLElement | null>(null)
+let io: IntersectionObserver | null = null
+onMounted(() => {
+  io = new IntersectionObserver(es => { if (es.some(e => e.isIntersecting) && !moreError.value) loadMore() }, { rootMargin: '800px 0px' })
+  watch(sentinel, (el, old) => { if (old) io?.unobserve(old); if (el) io?.observe(el) }, { immediate: true })
+})
+onBeforeUnmount(() => io?.disconnect())
+
 const draft = ref(qs.value.q)
 watch(() => qs.value.q, v => { draft.value = v })
 
-function go(patch: Partial<{ q: string; category: string; page: number }>) {
-  const next = { ...qs.value, page: 1, ...patch }
-  router.push({ query: { ...(next.q ? { q: next.q } : {}), ...(next.category ? { category: next.category } : {}), ...(next.page > 1 ? { page: String(next.page) } : {}) } })
+function go(patch: Partial<{ q: string; category: string }>) {
+  const next = { ...qs.value, ...patch }
+  router.push({ query: { ...(next.q ? { q: next.q } : {}), ...(next.category ? { category: next.category } : {}) } })
 }
 function submit() { go({ q: draft.value.trim() }) }
 
@@ -50,7 +85,7 @@ const fmt = (n: number) => n.toLocaleString('ru-RU')
     </nav>
 
     <p class="summary">
-      <template v-if="pending && !data">Загружаю каталог…</template>
+      <template v-if="pending"><span class="sk sk-line" aria-hidden="true" /><span class="sr-only">Загружаю каталог…</span></template>
       <template v-else-if="error">Каталог сейчас недоступен — спросите консультанта справа, он ищет по тому же каталогу.</template>
       <template v-else-if="data">
         <template v-if="data.total">{{ fmt(data.total) }} {{ plural(data.total, 'позиция', 'позиции', 'позиций') }}</template>
@@ -59,8 +94,16 @@ const fmt = (n: number) => n.toLocaleString('ru-RU')
       </template>
     </p>
 
-    <ul v-if="data?.items.length" class="grid" :class="{ dim: pending }">
-      <li v-for="it in data.items" :key="it.sku">
+    <!-- Скелет на время загрузки: те же размеры карточек, сетка не прыгает -->
+    <ul v-if="pending" class="grid" aria-hidden="true">
+      <li v-for="n in 12" :key="n" class="card sk-card" :style="{ animationDelay: `${(n % 4) * 90}ms` }">
+        <span class="sk sk-cat" /><span class="sk sk-name" /><span class="sk sk-name short" /><span class="sk sk-vendor" />
+        <span class="card-foot"><span class="sk sk-price" /><span class="sk sk-flag" /></span>
+      </li>
+    </ul>
+
+    <ul v-else-if="items.length" class="grid">
+      <li v-for="(it, i) in items" :key="it.sku" :class="{ 'anim-in': i >= (data?.items.length ?? 0) }">
         <NuxtLink :to="`/shop/${encodeURIComponent(it.sku)}`" class="card">
           <span class="card-cat">{{ it.category }}</span>
           <span class="card-name">{{ it.name }}</span>
@@ -79,11 +122,27 @@ const fmt = (n: number) => n.toLocaleString('ru-RU')
       </li>
     </ul>
 
-    <nav v-if="data && data.pages > 1" class="pager" aria-label="Страницы">
-      <button class="btn sm" :disabled="qs.page <= 1" @click="go({ page: qs.page - 1 })">Назад</button>
-      <span class="mono pager-pos">{{ qs.page }} из {{ fmt(Math.min(data.pages, 200)) }}</span>
-      <button class="btn sm" :disabled="qs.page >= Math.min(data.pages, 200)" @click="go({ page: qs.page + 1 })">Дальше</button>
-    </nav>
+    <ul v-if="loadingMore" class="grid more-sk" aria-hidden="true">
+      <li v-for="n in 4" :key="n" class="card sk-card" :style="{ animationDelay: `${n * 90}ms` }">
+        <span class="sk sk-cat" /><span class="sk sk-name" /><span class="sk sk-vendor" />
+        <span class="card-foot"><span class="sk sk-price" /><span class="sk sk-flag" /></span>
+      </li>
+    </ul>
+
+    <div v-if="!pending && items.length" ref="sentinel" class="tail" aria-live="polite">
+      <template v-if="moreError">
+        Не удалось догрузить. <button class="btn sm" @click="loadMore">Повторить</button>
+      </template>
+      <template v-else-if="hasMore">
+        <span class="mono">Показано {{ fmt(items.length) }} из {{ fmt(data?.total ?? 0) }}</span>
+      </template>
+      <template v-else-if="(data?.total ?? 0) > items.length">
+        <span class="mono">Показаны первые {{ fmt(items.length) }} — уточните поиск или раздел</span>
+      </template>
+      <template v-else-if="items.length > 24">
+        <span class="mono">Это все {{ fmt(items.length) }}</span>
+      </template>
+    </div>
   </div>
 </template>
 
@@ -164,7 +223,6 @@ const fmt = (n: number) => n.toLocaleString('ru-RU')
   transition: opacity 120ms var(--ease);
 }
 
-.grid.dim { opacity: 0.55; }
 
 .card {
   min-width: 0;
@@ -259,17 +317,50 @@ const fmt = (n: number) => n.toLocaleString('ru-RU')
   color: var(--indigo);
 }
 
-.pager {
+/* Скелет: серые плашки с бегущим бликом */
+.sk {
+  display: block;
+  border-radius: 4px;
+  background: linear-gradient(90deg, var(--bg-hover) 0%, var(--bg-active) 40%, var(--bg-hover) 80%) 0 0 / 300% 100%;
+  animation: sk-shine 1.3s linear infinite;
+  animation-delay: inherit;
+}
+
+@keyframes sk-shine {
+  from { background-position: 100% 0; }
+  to { background-position: -50% 0; }
+}
+
+.sk-card { min-height: 150px; pointer-events: none; }
+.sk-card:hover { border-color: var(--line); }
+.sk-line { display: inline-block; width: 140px; height: 12px; vertical-align: middle; }
+.sk-cat { width: 40%; height: 9px; margin-bottom: 4px; }
+.sk-name { width: 92%; height: 13px; }
+.sk-name.short { width: 64%; }
+.sk-vendor { width: 46%; height: 10px; margin-top: 4px; }
+.sk-price { width: 76px; height: 14px; }
+.sk-flag { width: 64px; height: 10px; }
+
+.more-sk { margin-top: 10px; }
+
+.tail {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 12px;
-  margin-top: 20px;
-}
-
-.pager-pos {
+  gap: 10px;
+  min-height: 48px;
+  margin-top: 12px;
   font-size: 12px;
   color: var(--ink-3);
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
 }
 
 @media (max-width: 560px) {

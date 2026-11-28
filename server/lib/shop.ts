@@ -28,6 +28,8 @@ type Row = Omit<ShopItem, 'price' | 'lot'> & { price_cents: bigint | null; head:
 // head — первый пункт описания: там фид кладёт партию («Кол-во в заказе: от 25 до 49»)
 const COLS = `sku, name, vendor, category, unit, term_months, price_cents, stock, lead_days, in_registry, split_part(description, ' • ', 1) as head`
 export const PAGE = 24
+/** Кеш числа позиций по запросу и разделу (каталог обновляется раз в сутки) */
+const totals = new Map<string, { at: number; n: number }>()
 
 const view = ({ price_cents, head, ...r }: Row): ShopItem => ({
   ...r,
@@ -54,11 +56,23 @@ export async function shopSearch(opts: { query?: string; category?: string; page
     const order = ts
       ? `ts_rank(search_tsv, to_tsquery('russian', $1)) desc, (price_cents is null), name`
       : `(price_cents is null), in_registry desc, name`
+    // Число позиций — отдельным запросом и из кеша: оконный count(*) over() заставлял сортировать весь каталог на каждой странице
+    const key = `${ts ?? ''}\u0000${cat}`
+    const hit = totals.get(key)
+    const totalP = hit && Date.now() - hit.at < 600_000
+      ? Promise.resolve(hit.n)
+      : q1<{ n: number }>(`select count(*)::int as n from catalog_items ${w}`, params.slice()).then((r) => {
+          if (totals.size > 500) totals.clear()
+          totals.set(key, { at: Date.now(), n: r?.n ?? 0 })
+          return r?.n ?? 0
+        })
     params.push(PAGE, (page - 1) * PAGE)
-    const rows = await q<Row & { total: number }>(
-      `select ${COLS}, count(*) over()::int as total from catalog_items ${w}
-       order by ${order} limit $${params.length - 1} offset $${params.length}`, params)
-    return { items: rows.map(({ total: _, ...r }) => view(r)), total: rows[0]?.total ?? 0 }
+    const [rows, total] = await Promise.all([
+      q<Row>(`select ${COLS} from catalog_items ${w}
+       order by ${order} limit $${params.length - 1} offset $${params.length}`, params),
+      totalP,
+    ])
+    return { items: rows.map(view), total }
   }
   let r = await run(tq?.all ?? null)
   // все слова вместе не нашлись — ищем по любому, как агент

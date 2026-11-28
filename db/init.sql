@@ -57,6 +57,8 @@ ALTER TABLE catalog_items ADD COLUMN IF NOT EXISTS search_tsv tsvector GENERATED
   setweight(to_tsvector('russian', description), 'D')
 ) STORED;
 CREATE INDEX IF NOT EXISTS catalog_tsv ON catalog_items USING gin (search_tsv);
+-- Витрина без фильтра: порядок «с ценой → из реестра → по имени» читается по индексу, без сортировки всего каталога
+CREATE INDEX IF NOT EXISTS catalog_shop_order ON catalog_items ((price_cents IS NULL), in_registry DESC, name);
 
 -- Особые условия: скидки за объём, продление, партнёрам, госзаказчикам, отсрочка
 CREATE TABLE IF NOT EXISTS price_rules (

@@ -21,5 +21,7 @@ export default defineEventHandler(async (event) => {
     sources: r.sources.filter(s => !s.expired),
     drafts: r.drafts,
     escalated: !!r.escalation,
+    pii: r.pii,
+    suggestions: r.suggestions,
   }
 })

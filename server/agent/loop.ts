@@ -14,6 +14,7 @@ import { pickLlm, type Llm } from './llm'
 import { systemPrompt, systemTail } from './prompt'
 import { analogQuery, clarifyFirst, selectionQueries } from './catalog-search'
 import { TOOL_DEFS, runTool, type Turn, type Source, type Draft, type Escalation } from './tools'
+import { suggestNext } from './suggest'
 import { deferralAsk, discountAsk, GOODWILL_PCT } from './money-asks'
 import { absorbQuestion, admitsNoAnswer, checkActions, checkRegistry, describe, emptyFacts, verifyAnswer, type Verdict } from './verify'
 
@@ -30,6 +31,10 @@ export interface AgentReply {
   drafts: Draft[]
   escalation: Escalation | null
   verify: Verdict
+  /** сколько фрагментов ПДн спрятано в этой реплике клиента: модель их не видела */
+  pii: number
+  /** подсказки следующего вопроса для кнопок под ответом */
+  suggestions: string[]
   run: { model: string; steps: number; inputTokens: number; outputTokens: number; costRub: number; durationMs: number; tools: Turn['calls'] }
 }
 
@@ -283,6 +288,16 @@ export async function ask(input: AskInput): Promise<AgentReply> {
     drafts: t.drafts,
     escalation: t.escalation,
     verify: verdict,
+    // счёт по одной реплике: история маскируется вместе с ней, но клиенту важно, что спрятано сейчас
+    pii: maskPii(question).found,
+    suggestions: suggestNext({
+      question,
+      earlier: history.filter(h => h.role === 'user').map(h => h.content),
+      tools: t.calls.filter(c => c.ok).map(c => c.name),
+      drafts: t.drafts,
+      sources: t.sources.filter(s => !s.expired),
+      escalation: t.escalation,
+    }),
     run: { model: `${llm.kind}:${llm.model}`, steps, inputTokens: usage.input, outputTokens: usage.output, costRub: usage.rub, durationMs, tools: t.calls },
   }
 }
