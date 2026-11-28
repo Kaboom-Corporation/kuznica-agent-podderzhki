@@ -16,6 +16,8 @@ const qs = computed(() => ({
   page: Number(route.query.page) || 1,
 }))
 const { data, pending, error } = useFetch<ShopResult>('/api/shop', { query: qs })
+const firstSku = useState<string | null>('shop-first', () => null)
+watch(data, d => { firstSku.value = d?.items[0]?.sku ?? null }, { immediate: true })
 
 const draft = ref(qs.value.q)
 watch(() => qs.value.q, v => { draft.value = v })

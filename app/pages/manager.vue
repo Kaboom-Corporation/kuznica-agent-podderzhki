@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { qtyUnit, renderMd, rub } from '~/utils/md'
+import GuideTour from '~/components/GuideTour.vue'
+import { TOUR_MANAGER } from '~/utils/tour'
 
 interface Row { id: string; channel: string; status: string; subject: string | null; customer_company: string | null; updated_at: string; last_question: string | null; draft_proposals: number; open_escalations: number; cost_rub: string }
 interface Item { sku: string; name: string; unit: string; qty: number; unit_cents: string; discount_pct: number; sum_cents: string }
@@ -14,6 +16,7 @@ const token = ref('')
 const tokenInput = ref('')
 const authError = ref('')
 const tab = ref<'queue' | 'stats'>('queue')
+const tour = ref<InstanceType<typeof GuideTour> | null>(null)
 const filter = ref<'' | 'waiting_manager'>('waiting_manager')
 const rows = ref<Row[]>([])
 const card = ref<Card | null>(null)
@@ -331,6 +334,7 @@ onBeforeUnmount(() => {
         </div>
 
         <div class="topbar-right">
+          <button class="btn ghost sm hide-narrow" @click="tour?.start()">Как это устроено</button>
           <NuxtLink to="/" class="btn ghost sm">Чат клиента</NuxtLink>
           <button v-if="token" class="btn ghost sm" @click="logout">Выйти</button>
         </div>
@@ -755,6 +759,7 @@ onBeforeUnmount(() => {
         </div>
       </form>
     </dialog>
+    <GuideTour ref="tour" id="manager" :steps="TOUR_MANAGER" />
   </div>
 </template>
 

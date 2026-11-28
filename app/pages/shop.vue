@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import ChatPanel, { type ChatPage } from '~/components/ChatPanel.vue'
+import GuideTour from '~/components/GuideTour.vue'
+import { TOUR_ITEM, TOUR_SHOP } from '~/utils/tour'
 
 // Родитель витрины: чат живёт здесь и не пересоздаётся при переходе между списком и карточкой —
 // диалог, прокрутка и набранный текст сохраняются. Дочерняя страница сообщает, что открыто.
@@ -11,6 +13,13 @@ const chat = ref<InstanceType<typeof ChatPanel> | null>(null)
 const starters = computed(() => page.value
   ? ['Сколько будет стоить на 10 рабочих мест?', 'Есть ли российский аналог?', 'Подготовьте КП на эту позицию']
   : ['Нужен антивирус на 30 компьютеров', 'Чем заменить Microsoft Office?', 'Что есть из реестра отечественного ПО для бухгалтерии?'])
+
+const tour = ref<InstanceType<typeof GuideTour> | null>(null)
+// список кладёт сюда первую карточку — тур ведёт в неё
+const firstSku = useState<string | null>('shop-first', () => null)
+const tourNext = computed(() => page.value
+  ? { label: 'Дальше: панель менеджера', to: '/manager?tour=1' }
+  : firstSku.value ? { label: 'Открыть карточку', to: `/shop/${encodeURIComponent(firstSku.value)}?tour=1` } : undefined)
 
 const route = useRoute()
 watch(() => route.fullPath, () => { sheetOpen.value = false })
@@ -25,6 +34,7 @@ watch(() => route.fullPath, () => { sheetOpen.value = false })
           <span class="brand-name">{{ shopName }}</span>
         </NuxtLink>
         <div class="topbar-right">
+          <button class="btn ghost sm hide-narrow" @click="tour?.start()">Как это устроено</button>
           <NuxtLink to="/" class="btn ghost sm">Чат</NuxtLink>
           <NuxtLink to="/manager" class="btn ghost sm">Панель менеджера</NuxtLink>
         </div>
@@ -61,6 +71,7 @@ watch(() => route.fullPath, () => { sheetOpen.value = false })
       Спросить консультанта
     </button>
     <div v-if="sheetOpen" class="sheet-backdrop" aria-hidden="true" @click="sheetOpen = false" />
+    <GuideTour ref="tour" id="shop" :steps="page ? TOUR_ITEM : TOUR_SHOP" :next="tourNext" />
   </div>
 </template>
 
