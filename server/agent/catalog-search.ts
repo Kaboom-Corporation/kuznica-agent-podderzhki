@@ -108,6 +108,13 @@ export function perSeat(name: string): boolean {
     && !/на\s+\d+\s*(пк|устр|польз|раб)/iu.test(name)
 }
 
+/** Комплект «на 50 ПК»: цена за весь комплект, в заказе считается штуками комплектов. Возвращает число мест в комплекте. */
+export function packSeats(name: string): number | null {
+  if (perSeat(name)) return null
+  const m = /на\s+(\d+)\s*(пк|устр|польз|раб)/iu.exec(name)
+  return m ? Number(m[1]) : null
+}
+
 /** Срок в месяцах из запроса («на год», «2 года», «36 мес»): поднимаем позиции с таким сроком. */
 export function termMonths(query: string): number | null {
   const s = query.toLowerCase()

@@ -5,7 +5,7 @@
  */
 import { q, q1 } from '../lib/db'
 import { searchKb } from '../ported/rag/searcher'
-import { buildTsQueries, lotFits, lotText, orderLot, perSeat, russianVendor, seatCount, termMonths, withoutLot } from './catalog-search'
+import { buildTsQueries, lotFits, lotText, orderLot, packSeats, perSeat, russianVendor, seatCount, termMonths, withoutLot } from './catalog-search'
 import { absorb, type Facts } from './verify'
 import { discountAsk } from './money-asks'
 import { buildQuote, hasPrice, quoteForModel, rub, CONDITIONS, GOODWILL_RULE, type CatalogItem, type Condition, type PricedItem, type PriceRule } from './quote'
@@ -293,6 +293,12 @@ async function quote(args: Record<string, unknown>, t: Turn) {
   const lone = seats && seats > 1 ? wanted.filter(w => w.qty === 1 && perSeat(w.item.name)) : []
   if (lone.length) {
     return { error: `${lone.map(w => w.item.sku).join(', ')}: цена за одно место, а клиенту нужно ${seats}. Передай qty ${seats} для этих позиций (qty_for_order из check_stock).` }
+  }
+  // Обратный случай, стенд 28.11: Dr.Web «на 50 ПК» — комплект с партией «от 1 до 1», модель передала qty 50 (компьютеры),
+  // проверка партии отправила КП менеджеру. Число мест, кратное комплекту, — это штуки комплектов; молча не правим.
+  const packs = wanted.filter(w => w.qty > 1 && packSeats(w.item.name) != null && w.qty % packSeats(w.item.name)! === 0)
+  if (packs.length) {
+    return { error: packs.map(w => `${w.item.sku} — комплект на ${packSeats(w.item.name)} мест, цена за весь комплект. Для ${w.qty} мест передай qty ${w.qty / packSeats(w.item.name)!}.`).join(' ') }
   }
   const lotError = await lotErrors(wanted)
   if (lotError) return { error: lotError }
