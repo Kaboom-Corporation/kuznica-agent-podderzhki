@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildQuote, GOODWILL_RULE, rub, vatInside, type CatalogItem, type PriceRule } from '../server/agent/quote'
+import { buildQuote, GOODWILL_RULE, hasPrice, rub, vatInside, type CatalogItem, type PricedItem, type PriceRule } from '../server/agent/quote'
 import { absorb, absorbQuestion, admitsNoAnswer, checkActions, emptyFacts, verifyAnswer } from '../server/agent/verify'
 
 describe('admitsNoAnswer', () => {
@@ -21,7 +21,7 @@ describe('admitsNoAnswer', () => {
   })
 })
 
-const item = (sku: string, price: bigint, extra: Partial<CatalogItem> = {}): CatalogItem => ({
+const item = (sku: string, price: bigint, extra: Partial<PricedItem> = {}): PricedItem => ({
   sku, name: sku, vendor: 'Вендор', category: 'antivirus', unit: 'лицензия', term_months: 12,
   price_cents: price, stock: -1, lead_days: 0, in_registry: true, description: '', ...extra,
 })
@@ -54,6 +54,10 @@ describe('quote', () => {
     expect(silent.possible).toEqual([])
     const bigger = buildQuote([{ item: item('AV-1', 100000n), qty: 50 }], [rule('vol50', 10, { min_qty: 50 }), GOODWILL_RULE], new Set(['asked_discount']), 22)
     expect(bigger.lines[0]!.discount_pct).toBe(10)
+  })
+  it('позиция без цены («по запросу») в расчёт не идёт', () => {
+    expect(hasPrice(item('AV-1', 100n))).toBe(true)
+    expect(hasPrice({ ...item('AV-2', 1n), price_cents: null })).toBe(false)
   })
   it('НДС внутри цены и формат рублей', () => {
     expect(vatInside(12_200n, 22)).toBe(2_200n)

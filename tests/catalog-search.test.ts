@@ -117,7 +117,9 @@ describe('фид YML', () => {
     expect(it.description).not.toContain('другое или отсутствует')
   })
   it('без цены и не в наличии', () => {
-    expect(parseOffer(offer.replace('6739.20', '0.00'), () => '')).toBeNull()
+    // без цены позиция остаётся в каталоге «по запросу», а не пропадает
+    expect(parseOffer(offer.replace('6739.20', '0.00'), () => '')!.price_cents).toBeNull()
+    expect(parseOffer(offer.replace(/<name>[\s\S]*?<\/name>/, '<name></name>'), () => '')).toBeNull()
     expect(parseOffer(offer.replace('available="true"', 'available="false"'), () => '')!.stock).toBe(0)
   })
   it('сущности XML', () => {

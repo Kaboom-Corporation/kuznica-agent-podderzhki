@@ -16,7 +16,7 @@ async function main() {
   const client = await pool.connect()
   try {
     const r = await withFeed(FEED, s => loadFeed(client, s))
-    if (!r.applied) throw new Error(`фид не применён: позиций с ценой ${r.feed.priced}, в каталоге было ${r.current} — каталог не тронут`)
+    if (!r.applied) throw new Error(`фид не применён: позиций ${r.feed.loaded} (с ценой ${r.feed.priced}), в каталоге было ${r.current} — каталог не тронут`)
     console.log(feedSummary(r.feed))
   }
   finally {

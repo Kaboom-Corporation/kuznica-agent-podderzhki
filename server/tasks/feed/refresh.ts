@@ -17,7 +17,7 @@ export default defineTask({
       const r = await withFeedUrl(url, s => loadFeed(client, s))
       const msg = r.applied
         ? `${feedSummary(r.feed)}; за ${Math.round((Date.now() - started) / 1000)} с`
-        : `фид не применён: позиций с ценой ${r.feed.priced}, в каталоге было ${r.current}`
+        : `фид не применён: позиций ${r.feed.loaded} (с ценой ${r.feed.priced}), в каталоге было ${r.current}`
       console[r.applied ? 'log' : 'warn'](`[feed:refresh] ${msg}`)
       return { result: msg }
     }

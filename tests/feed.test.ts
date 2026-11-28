@@ -22,14 +22,15 @@ describe('ежедневный фид', () => {
     expect(f.items.map(i => [i.sku, i.price_cents, i.stock, i.category])).toEqual([
       ['SL-100', 150050n, -1, 'Антивирусы / Для бизнеса'],
       ['SL-101', 90000n, 0, 'Антивирусы / Для бизнеса'],
+      ['SL-102', null, -1, 'Антивирусы'],
     ])
   })
   it('с onItem позиции не копятся в памяти, а уходят по одной; счётчики те же', async () => {
     const got: string[] = []
     const f = await parseFeed(chunks(YML), (i) => { got.push(i.sku) })
-    expect(got).toEqual(['SL-100', 'SL-101'])
+    expect(got).toEqual(['SL-100', 'SL-101', 'SL-102'])
     expect(f.items).toEqual([])
-    expect([f.priced, f.available, f.offers]).toEqual([2, 1, 3])
+    expect([f.loaded, f.priced, f.available, f.offers]).toEqual([3, 2, 2, 3])
   })
   it('битый или урезанный фид каталог не заменяет', () => {
     expect(feedLooksBroken(0, 0)).toBe(true)

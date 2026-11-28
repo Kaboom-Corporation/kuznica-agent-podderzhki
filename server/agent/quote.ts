@@ -14,13 +14,18 @@ export interface CatalogItem {
   category: string
   unit: string
   term_months: number | null
-  price_cents: bigint
+  /** NULL — цены в фиде нет («по запросу»): в расчёт не идёт, такие позиции передаются менеджеру */
+  price_cents: bigint | null
   stock: number
   lead_days: number | null
   url?: string | null
   in_registry: boolean
   description: string
 }
+
+/** Позиция с ценой — только такие идут в расчёт КП и счёта. */
+export type PricedItem = CatalogItem & { price_cents: bigint }
+export const hasPrice = (i: CatalogItem): i is PricedItem => i.price_cents != null
 
 export interface PriceRule {
   code: string
@@ -112,7 +117,7 @@ export function vatInside(totalCents: bigint, vatPercent: number): bigint {
 }
 
 export function buildQuote(
-  wanted: { item: CatalogItem; qty: number }[],
+  wanted: { item: PricedItem; qty: number }[],
   rules: PriceRule[],
   conditions: Set<Condition>,
   vatPercent: number,

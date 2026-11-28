@@ -32,7 +32,7 @@ export interface Observed {
   verifyOk: boolean
 }
 
-export interface Catalog { sku: string; name: string; price_cents: bigint }
+export interface Catalog { sku: string; name: string; price_cents: bigint | null }
 
 export interface Score {
   pass: boolean
@@ -86,9 +86,9 @@ export function score(item: EvalItem, o: Observed, catalog: Catalog[]): Score {
   for (const s of e.must_not_include ?? []) checks[`нет «${s}»`] = !t.includes(norm(s))
   const want = catalog.filter(c => (e.skus_any ?? []).includes(c.sku))
   if (want.length && e.kind !== 'clarify') {
-    checks['нужный товар'] = want.some(c => o.proposalSkus.includes(c.sku) || hasPrice(o.text, c.price_cents) || nameHit(o.text, c.name))
+    checks['нужный товар'] = want.some(c => o.proposalSkus.includes(c.sku) || (c.price_cents != null && hasPrice(o.text, c.price_cents)) || nameHit(o.text, c.name))
   }
-  if (e.price_from_catalog && want.length) checks['цена из каталога'] = want.some(c => hasPrice(o.text, c.price_cents)) || o.proposalSkus.some(s => want.some(c => c.sku === s))
+  if (e.price_from_catalog && want.length) checks['цена из каталога'] = want.some(c => (c.price_cents != null && hasPrice(o.text, c.price_cents))) || o.proposalSkus.some(s => want.some(c => c.sku === s))
   if (e.source_slug) checks[`источник ${e.source_slug}`] = o.sourceSlugs.includes(e.source_slug)
   checks['сверка чисел'] = o.verifyOk || o.escalated
   const fails = Object.entries(checks).filter(([, v]) => !v).map(([k]) => k)

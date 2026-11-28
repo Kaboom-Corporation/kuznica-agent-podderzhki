@@ -8,7 +8,7 @@ import { searchKb } from '../ported/rag/searcher'
 import { buildTsQueries, lotFits, lotText, orderLot, perSeat, russianVendor, seatCount, termMonths, withoutLot } from './catalog-search'
 import { absorb, type Facts } from './verify'
 import { discountAsk } from './money-asks'
-import { buildQuote,quoteForModel, rub, CONDITIONS, GOODWILL_RULE, type CatalogItem, type Condition, type PriceRule } from './quote'
+import { buildQuote, hasPrice, quoteForModel, rub, CONDITIONS, GOODWILL_RULE, type CatalogItem, type Condition, type PricedItem, type PriceRule } from './quote'
 
 export interface Source { slug: string; title: string; heading: string | null; expired: boolean }
 export interface Draft { kind: 'proposal' | 'invoice'; id: string; number: string; total: string }
@@ -151,6 +151,9 @@ async function search(query: string, t: Turn) {
   return out
 }
 
+/** Что модель видит вместо цены у позиции без цены в фиде. */
+export const ON_REQUEST = 'цена по запросу — сумму не называй и не считай, предложи передать менеджеру (handoff_to_manager, kind=needs_human)'
+
 async function checkStock(query: string, question = '') {
   if (!query) return { error: 'пустой запрос' }
   const rows = await findItems(query, question)
@@ -159,7 +162,7 @@ async function checkStock(query: string, question = '') {
   return {
     items: rows.map(r => ({
       // цена за узел/пользователя: итог за места клиента считает код, а не модель
-      ...(seats && seats > 1 && perSeat(r.name) ? { total_for_seats: `${rub(BigInt(r.price_cents) * BigInt(seats))} за ${seats} мест` } : {}),
+      ...(seats && seats > 1 && perSeat(r.name) && hasPrice(r) ? { total_for_seats: `${rub(r.price_cents * BigInt(seats))} за ${seats} мест` } : {}),
       // сколько ставить в qty для get_price/draft_proposal: цена за место → число мест, комплект «на 50 ПК» → 1
       ...(seats && seats > 1 ? { qty_for_order: perSeat(r.name) ? seats : 1 } : {}),
       ...lotView(r, seats),
@@ -169,7 +172,7 @@ async function checkStock(query: string, question = '') {
       category: r.category,
       unit: r.unit,
       term: r.term_months ? `${r.term_months} мес.` : 'бессрочная',
-      price: rub(BigInt(r.price_cents)),
+      price: hasPrice(r) ? rub(r.price_cents) : ON_REQUEST,
       // нет в наличии: цену называть и КП/счёт готовить можно, менеджер подтверждает только поставку (заказчик, 27.11)
       in_stock: r.stock < 0 ? 'доступно к заказу' : r.stock > 0 ? `${r.stock} шт.` : 'сейчас нет в наличии — цену назвать и КП подготовить можно, поставку подтвердит менеджер',
       lead: r.lead_days == null ? 'срок поставки в каталоге не указан — не называй его, предложи уточнить у менеджера' : `${r.lead_days} раб. дн.`,
@@ -207,7 +210,7 @@ async function lotErrors(wanted: { item: CatalogItem; qty: number }[]): Promise<
     const fit = same.find(s => withoutLot(s.description) === base && orderLot(s.description) && lotFits(orderLot(s.description), w.qty))
     const head = `${w.item.sku} продаётся только партией ${lotText(lot)}, а нужно ${w.qty}.`
     return fit
-      ? `${head} Для ${w.qty} шт. есть ${fit.sku} (партия ${lotText(orderLot(fit.description)!)}, ${rub(BigInt(fit.price_cents))} за шт.) — передай ${fit.sku} вместо ${w.item.sku}.`
+      ? `${head} Для ${w.qty} шт. есть ${fit.sku} (партия ${lotText(orderLot(fit.description)!)}, ${hasPrice(fit) ? `${rub(fit.price_cents)} за шт.` : 'цена по запросу'}) — передай ${fit.sku} вместо ${w.item.sku}.`
       : `${head} Подходящей партии в каталоге нет — не считай сам, передай вопрос менеджеру (handoff_to_manager).`
   }))
   return hints.join(' ')
@@ -231,6 +234,8 @@ export async function findItems(query: string, question = ''): Promise<CatalogIt
     `select c.* from catalog_items c, to_tsquery('russian', $1) tq
       where c.search_tsv @@ tq
       order by ts_rank(c.search_tsv, tq, 1) + case when c.stock <> 0 then 0.1 else 0 end + 0.2 * word_similarity($2, c.name)
+        -- позиция с ценой выше «по запросу»: при прочих равных клиенту сразу можно назвать сумму
+        + case when c.price_cents is not null then 0.15 else 0 end
         + case when $3::text is not null and c.name ~* ('(^|[^0-9])' || $3::text || '\\s*(устр|пк|компьют|польз|раб|лиц|мест)') then 0.3 else 0 end
         + case when c.term_months = $4::int then 0.2 else 0 end
         -- цена за место зависит от диапазона («К-во узлов от 50 до 99»): свой диапазон выше, чужие ниже
@@ -276,7 +281,12 @@ async function quote(args: Record<string, unknown>, t: Turn) {
   const found = await q<CatalogItem>('select * from catalog_items where sku = any($1)', [skus])
   const missing = skus.filter(s => !found.some(f => f.sku === s))
   if (missing.length) return { error: `нет в каталоге: ${missing.join(', ')}. Найди артикул через check_stock.` }
-  const wanted = items.map(i => ({ item: found.find(f => f.sku === i.sku)!, qty: i.qty }))
+  // Цены в фиде нет — считать нечем. Не придумываем и не берём «похожую» цену: позицию считает менеджер.
+  const onRequest = found.filter(f => !hasPrice(f))
+  if (onRequest.length) {
+    return { error: `${onRequest.map(f => f.sku).join(', ')}: цена по запросу, в каталоге её нет. Не называй цену и не составляй КП с этой позицией. Передай менеджеру (handoff_to_manager, kind=needs_human): в reason — артикул, название и количество. Клиенту скажи, что менеджер пришлёт цену.` }
+  }
+  const wanted = items.map(i => ({ item: found.find(f => f.sku === i.sku) as PricedItem, qty: i.qty }))
   // Цена за место, клиент назвал 50 мест, а модель передала qty 1 — КП вышло бы на одно место.
   // Молча не правим: возвращаем модели, пусть передаст число мест сама.
   const seats = [t.question, ...(t.earlier ?? []).toReversed()].map(s => seatCount(s)).find(n => n != null)

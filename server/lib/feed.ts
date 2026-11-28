@@ -1,6 +1,7 @@
 /**
  * Каталог магазина из товарного фида YML (формат Яндекс.Маркета: <categories>, <offers>).
- * Берёт позиции с ценой; есть в наличии → stock = -1 (доступно к заказу), нет → 0.
+ * Берёт все позиции фида. Нет цены → price_cents = NULL («цена по запросу»: агент позицию находит,
+ * но не считает, а передаёт менеджеру). Есть в наличии → stock = -1 (доступно к заказу), нет → 0.
  * Срока поставки в фиде нет — lead_days = NULL, агент не называет срок, а предлагает уточнить у менеджера.
  * Скидочные правила демо-магазина к чужому прайсу не относятся: price_rules очищаются, считаем по прайсу
  * (скидку 5% по просьбе клиента даёт код, server/agent/quote.ts).
@@ -44,7 +45,7 @@ const KEEP = ['Тип организации', 'Тип лицензии', 'По�
 
 export interface FeedItem {
   sku: string; name: string; vendor: string; category: string; unit: string; term_months: number | null
-  price_cents: bigint; stock: number; in_registry: boolean; description: string; url: string | null
+  price_cents: bigint | null; stock: number; in_registry: boolean; description: string; url: string | null
 }
 
 export function parseOffer(block: string, categoryPath: (id: string) => string): FeedItem | null {
@@ -53,7 +54,8 @@ export function parseOffer(block: string, categoryPath: (id: string) => string):
   const id = /\bid="([^"]+)"/.exec(head[1]!)?.[1]
   const available = /\bavailable="true"/.test(head[1]!)
   const price = toCents(tag(block, 'price'))
-  if (!id || price == null || price <= 0n) return null
+  const name = tag(block, 'name')
+  if (!id || !name) return null
 
   const params = new Map<string, string[]>()
   for (const m of block.matchAll(/<param name="([^"]+)"[^>]*>([\s\S]*?)<\/param>/g)) {
@@ -80,12 +82,12 @@ export function parseOffer(block: string, categoryPath: (id: string) => string):
 
   return {
     sku: `SL-${id}`,
-    name: tag(block, 'name'),
+    name,
     vendor: tag(block, 'vendor') || 'без вендора',
     category: categoryPath(tag(block, 'categoryId')),
     unit: hardware ? 'шт.' : 'лицензия',
     term_months: term ? Number(term[1]) : null,
-    price_cents: price,
+    price_cents: price != null && price > 0n ? price : null,
     stock: available ? -1 : 0,
     in_registry: !!registry,
     description,
@@ -94,9 +96,10 @@ export function parseOffer(block: string, categoryPath: (id: string) => string):
 }
 
 export interface ParsedFeed {
-  /** Позиции с ценой; пусто, если разбор шёл с onItem (тогда позиции сразу уходят в базу). */
+  /** Позиции; пусто, если разбор шёл с onItem (тогда позиции сразу уходят в базу). */
   items: FeedItem[]
-  offers: number; categories: number; priced: number; available: number; registry: number
+  /** loaded — позиции, попавшие в каталог; priced — из них с ценой. */
+  offers: number; categories: number; loaded: number; priced: number; available: number; registry: number
 }
 
 /**
@@ -122,6 +125,7 @@ export async function parseFeed(
 
   const items: FeedItem[] = []
   let offers = 0
+  let loaded = 0
   let priced = 0
   let available = 0
   let registry = 0
@@ -149,14 +153,15 @@ export async function parseFeed(
       const item = parseOffer(buf.slice(0, end), path)
       buf = buf.slice(end + 8)
       if (!item) continue
-      priced++
+      loaded++
+      if (item.price_cents != null) priced++
       if (item.stock < 0) available++
       if (item.in_registry) registry++
       if (onItem) await onItem(item)
       else items.push(item)
     }
   }
-  return { items, offers, categories: cats.size, priced, available, registry }
+  return { items, offers, categories: cats.size, loaded, priced, available, registry }
 }
 
 /** gzip — по сигнатуре 1f 8b: магазин отдаёт .yml.gz со сжатием HTTP, и fetch распаковывает его сам. */
@@ -200,7 +205,7 @@ export function withFeed<T>(src: string, fn: (s: AsyncIterable<string>) => Promi
 }
 
 /**
- * Защита от битого фида: если позиций с ценой стало меньше половины того, что уже в базе,
+ * Защита от битого фида: если позиций стало меньше половины того, что уже в базе,
  * каталог не трогаем — лучше вчерашние цены, чем пустой магазин.
  */
 export function feedLooksBroken(newCount: number, currentCount: number): boolean {
@@ -213,7 +218,7 @@ async function insertItems(client: pg.PoolClient, part: FeedItem[]): Promise<voi
   if (!part.length) return
   const values: unknown[] = []
   const rows = part.map((r, j) => {
-    values.push(r.sku, r.name, r.vendor, r.category, r.unit, r.term_months, r.price_cents.toString(), r.stock, r.in_registry, r.description, r.url)
+    values.push(r.sku, r.name, r.vendor, r.category, r.unit, r.term_months, r.price_cents?.toString() ?? null, r.stock, r.in_registry, r.description, r.url)
     return `(${Array.from({ length: COLS }, (_, k) => `$${j * COLS + k + 1}`).join(',')})`
   })
   await client.query(
@@ -244,7 +249,8 @@ export async function loadFeed(client: pg.PoolClient, source: AsyncIterable<stri
       }
     })
     await insertItems(client, part)
-    if (feedLooksBroken(feed.priced, current)) {
+    // фид без единой цены — тоже битый: каталог «всё по запросу» хуже вчерашнего
+    if (feedLooksBroken(feed.loaded, current) || feed.priced === 0) {
       await client.query('rollback')
       return { feed, applied: false, current }
     }
@@ -260,5 +266,5 @@ export async function loadFeed(client: pg.PoolClient, source: AsyncIterable<stri
 }
 
 export function feedSummary(f: ParsedFeed): string {
-  return `категорий: ${f.categories}, позиций в фиде: ${f.offers}, загружено с ценой: ${f.priced} (в наличии ${f.available}), в реестре ПО: ${f.registry}`
+  return `категорий: ${f.categories}, позиций в фиде: ${f.offers}, загружено: ${f.loaded}, из них с ценой: ${f.priced}, без цены (по запросу): ${f.loaded - f.priced}, в наличии ${f.available}, в реестре ПО: ${f.registry}`
 }

@@ -34,7 +34,7 @@ CREATE TABLE IF NOT EXISTS catalog_items (
   category        text NOT NULL,
   unit            text NOT NULL DEFAULT 'лицензия',
   term_months     int,                    -- срок лицензии/подписки; NULL = бессрочная
-  price_cents     bigint NOT NULL,
+  price_cents     bigint,                 -- NULL = цены в фиде нет: «по запросу», считает менеджер
   stock           int NOT NULL DEFAULT 0, -- доступно ключей/коробок; -1 = электронная поставка без ограничений
   lead_days       int,                    -- срок поставки, раб. дней; NULL = в фиде нет, уточняет менеджер
   url             text,                   -- карточка товара в магазине
@@ -45,6 +45,8 @@ CREATE TABLE IF NOT EXISTS catalog_items (
 -- базы, созданные до фида магазина
 ALTER TABLE catalog_items ADD COLUMN IF NOT EXISTS url text;
 ALTER TABLE catalog_items ALTER COLUMN lead_days DROP NOT NULL, ALTER COLUMN lead_days DROP DEFAULT;
+-- базы, где каталог был только из позиций с ценой
+ALTER TABLE catalog_items ALTER COLUMN price_cents DROP NOT NULL;
 CREATE INDEX IF NOT EXISTS catalog_trgm ON catalog_items USING gin (search_text gin_trgm_ops);
 -- Полнотекст с весами: название важнее вендора, вендор — категории, категория — описания.
 -- 'russian' стеммит кириллицу и английские слова (english_stem для латиницы).
