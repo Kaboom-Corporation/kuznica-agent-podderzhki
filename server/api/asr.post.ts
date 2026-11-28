@@ -13,7 +13,10 @@ export default defineEventHandler(async (event) => {
   if (!base) throw createError({ statusCode: 503, statusMessage: 'Голосовой ввод выключен' })
   rateLimit(event, 10, undefined, 'asr:')
 
-  const len = Number(getHeader(event, 'content-length') || 0)
+  // Без Content-Length (chunked) тело не ограничено — такой запрос не читаем. Браузер для FormData
+  // заголовок шлёт всегда, а Node не прочитает тело длиннее заявленного.
+  const len = Number(getHeader(event, 'content-length'))
+  if (!Number.isFinite(len) || len <= 0) throw createError({ statusCode: 411, statusMessage: 'Нужна длина запроса' })
   if (len > MAX_BYTES + 64 * 1024) throw createError({ statusCode: 413, statusMessage: 'Запись слишком длинная — до минуты' })
   const parts = await readMultipartFormData(event)
   const audio = parts?.find(p => p.name === 'file' && p.data?.length)
