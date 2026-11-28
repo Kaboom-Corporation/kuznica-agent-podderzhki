@@ -21,6 +21,8 @@ export default defineNuxtPlugin(() => {
   s.src = feedbackScript
   s.async = true
   s.dataset.project = feedbackProject
+  // без data-endpoint виджет шлёт замечания на этот же сайт (/api/bugs), а приёмник — там, откуда сам виджет
+  try { s.dataset.endpoint = new URL('/api/bugs', feedbackScript).href } catch { return }
   s.dataset.feedbackWidget = ''
   document.head.appendChild(s)
 })
