@@ -915,7 +915,7 @@ onBeforeUnmount(() => {
         </div>
         <p v-if="kbNotice" class="kb-notice" role="status">{{ kbNotice }}</p>
         <div class="kb-shelves">
-          <section v-for="g in kbGroups" :key="g.key" class="kb-shelf">
+          <section v-for="g in kbGroups" :key="g.key" class="kb-shelf" :style="{ flex: `${Math.min(g.items.length, 4)} 1 ${Math.min(g.items.length, 4) * 270}px` }">
             <h3 class="kb-shelf-h">{{ g.label }} <span class="muted num">{{ g.items.length }}</span></h3>
             <div class="kb-grid">
               <article v-for="d in g.items" :key="d.id" class="kb-card">
@@ -1706,7 +1706,9 @@ onBeforeUnmount(() => {
 .kb-cat[aria-pressed="true"] { background: var(--ink); border-color: var(--ink); color: #fff; }
 .kb-cat[aria-pressed="true"] .num { color: rgba(255, 255, 255, 0.65); }
 .kb-cat:focus-visible { outline: 2px solid var(--indigo); outline-offset: 1px; }
-.kb-shelves { display: flex; flex-direction: column; gap: 18px; }
+/* BugCatcher 28.11: раздел с одной карточкой не тянется на всю строку — короткие разделы встают рядом */
+.kb-shelves { display: flex; flex-wrap: wrap; gap: 18px 24px; align-items: flex-start; }
+.kb-shelf { min-width: 0; }
 .kb-shelf-h { margin: 0 0 8px; font-size: 12px; font-weight: 600; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.04em; }
 .kb-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
 .kb-card {

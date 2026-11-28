@@ -82,6 +82,27 @@ async function scrollDown() {
   list.value?.scrollTo({ top: list.value.scrollHeight, behavior: 'smooth' })
 }
 
+// Затемнение края ленты — только если за этим краем есть скрытый текст. BugCatcher 28.11:
+// внизу ленты постоянное затемнение прятало последний ответ, хотя прокручивать было уже некуда.
+const fadeTop = ref(false)
+const fadeBottom = ref(false)
+function updateFade() {
+  const el = list.value
+  if (!el) return
+  fadeTop.value = el.scrollTop > 4
+  fadeBottom.value = el.scrollHeight - el.clientHeight - el.scrollTop > 4
+}
+let fadeObserver: ResizeObserver | null = null
+onMounted(() => {
+  updateFade()
+  if (list.value && typeof ResizeObserver !== 'undefined') {
+    fadeObserver = new ResizeObserver(updateFade)
+    fadeObserver.observe(list.value)
+    for (const child of Array.from(list.value.children)) fadeObserver.observe(child)
+  }
+})
+onBeforeUnmount(() => fadeObserver?.disconnect())
+
 async function loadHistory(id: string) {
   const r = await $fetch<{ messages: { role: Msg['role']; content: string }[] }>(`/api/chat/${id}`)
   return r.messages
@@ -197,6 +218,18 @@ function uniqSources(s: Source[] = []) {
   return s.filter(x => !seen.has(x.slug) && seen.add(x.slug))
 }
 
+// BugCatcher 28.11: источник под ответом — короткой сноской, а не полным заголовком страницы с разделом.
+// Полное название — во всплывающей подсказке.
+function shortTitle(title: string) {
+  const t = title
+    .replace(/^Демо Софт\s+(Акции\s+)?/u, '')
+    .replace(/\s+(в|для)\s+(B2B-маркетплейсе\s+)?Демо Софт$/u, '')
+    .replace(/\s+-\s+.*$/u, '')
+    .trim()
+  return t.length > 42 ? `${t.slice(0, 40).trimEnd()}…` : t
+}
+const MAX_SOURCES = 3
+
 onMounted(async () => {
   let id: string | null = null
   try { id = localStorage.getItem(KEY) } catch {}
@@ -219,7 +252,7 @@ defineExpose({ restart, messages, busy })
 
 <template>
 <div class="chat-body" :class="{ dock }">
-  <main ref="list" class="thread" aria-live="polite">
+  <main ref="list" class="thread" :class="{ 'fade-top': fadeTop, 'fade-bottom': fadeBottom }" aria-live="polite" @scroll.passive="updateFade">
     <!-- Welcome: Linear Command-List Style (no boxy card grid) -->
     <div v-if="!messages.length" class="welcome">
       <h1 class="welcome-h1">{{ title ?? 'Подбор ПО и расчёт КП' }}</h1>
@@ -292,10 +325,11 @@ defineExpose({ restart, messages, busy })
 
         <!-- Sources: Subtle Footnote -->
         <div v-if="m.sources?.length" class="sources">
-          <span>Источники:</span>
-          <span v-for="(s, idx) in uniqSources(m.sources)" :key="s.slug">
-            <template v-if="idx > 0"> · </template>{{ s.title }}<template v-if="s.heading"> ({{ s.heading }})</template>
+          <span>Источники: </span>
+          <span v-for="(s, idx) in uniqSources(m.sources).slice(0, MAX_SOURCES)" :key="s.slug" :title="s.heading ? `${s.title} — ${s.heading}` : s.title">
+            <template v-if="idx > 0"> · </template>{{ shortTitle(s.title) }}
           </span>
+          <span v-if="uniqSources(m.sources).length > MAX_SOURCES"> · ещё {{ uniqSources(m.sources).length - MAX_SOURCES }}</span>
         </div>
 
         <!-- Следующий вопрос: только под последним ответом, пока агент не занят -->
@@ -408,9 +442,13 @@ defineExpose({ restart, messages, busy })
   display: flex;
   flex-direction: column;
   gap: 24px;
-  /* текст у краёв ленты гаснет, а не режется на полстроке под шапкой и над полем ввода */
-  mask-image: linear-gradient(to bottom, transparent 0, #000 22px, #000 calc(100% - 26px), transparent 100%);
+  /* текст у края гаснет, а не режется на полстроке — только у края, за которым ещё есть текст */
+  --fade-t: 0px;
+  --fade-b: 0px;
+  mask-image: linear-gradient(to bottom, transparent 0, #000 var(--fade-t), #000 calc(100% - var(--fade-b)), transparent 100%);
 }
+.thread.fade-top { --fade-t: 22px; }
+.thread.fade-bottom { --fade-b: 26px; }
 
 /* реплики не сжимаются колонкой: высота всегда по содержимому */
 .thread > * {
