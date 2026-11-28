@@ -37,6 +37,13 @@ const pdfUrl = ref('')
 const pdfTitle = ref('Черновик КП — на проверку менеджеру')
 const pdfDialog = ref<HTMLDialogElement | null>(null)
 
+/** Причина эскалации «черновик ответа: …\nрасхождения: a; b» → черновик отдельно, расхождения списком. */
+function escParts(reason: string): { text: string, draft: string, issues: string[] } {
+  const m = /^черновик ответа:\s*([\s\S]*?)(?:\nрасхождения:\s*([\s\S]*))?$/.exec(reason || '')
+  if (!m) return { text: reason, draft: '', issues: [] }
+  return { text: '', draft: m[1]!.trim(), issues: (m[2] || '').split(';').map(s => s.trim()).filter(Boolean) }
+}
+
 const KIND: Record<string, [string, string]> = {
   needs_human: ['Нужен менеджер', 'warn'],
   no_answer: ['Нет ответа в базе', 'warn'],
@@ -505,7 +512,7 @@ onBeforeUnmount(() => {
     </main>
 
     <!-- Linear Split-View Inbox -->
-    <div v-else-if="tab === 'queue'" class="inbox">
+    <div v-else-if="tab === 'queue'" class="inbox anim-in">
       <!-- Left List (#F7F8F9) -->
       <aside class="inbox-list">
         <div class="inbox-bar">
@@ -562,7 +569,7 @@ onBeforeUnmount(() => {
           </div>
         </div>
 
-        <div class="ws-content">
+        <div :key="selected || ''" class="ws-content anim-in">
           <header class="ws-head">
             <div class="ws-head-row">
               <h1 class="ws-title">
@@ -588,8 +595,17 @@ onBeforeUnmount(() => {
                 <span class="status-dot" :class="KIND[e.kind]?.[1]" aria-hidden="true" />
                 <strong>{{ KIND[e.kind]?.[0] || e.kind }}</strong>
               </span>
-              <span class="esc-reason">{{ e.reason }}</span>
+              <span v-if="escParts(e.reason).text" class="esc-reason">{{ e.reason }}</span>
             </div>
+            <template v-if="!escParts(e.reason).text">
+              <ul v-if="escParts(e.reason).issues.length" class="esc-issues">
+                <li v-for="(x, i) in escParts(e.reason).issues" :key="i">{{ x }}</li>
+              </ul>
+              <details class="esc-draft">
+                <summary>Черновик агента — не отправлен клиенту</summary>
+                <div class="md" v-html="renderMd(escParts(e.reason).draft)" />
+              </details>
+            </template>
             <button class="btn sm" :disabled="busy" @click="resolve(e)">Закрыть</button>
           </div>
 
@@ -782,7 +798,7 @@ onBeforeUnmount(() => {
     </div>
 
     <!-- Stripe-style Stats & KB View -->
-    <main v-else-if="stats" class="stats-wrap">
+    <main v-else-if="stats" class="stats-wrap anim-in">
       <div class="stats-top">
         <div>
           <h1 class="stats-h1">Сводка и база знаний</h1>
@@ -1085,6 +1101,7 @@ onBeforeUnmount(() => {
   font-weight: 500;
   color: var(--ink-3);
   cursor: pointer;
+  transition: background 160ms var(--ease), color 160ms var(--ease), box-shadow 160ms var(--ease);
 }
 
 .filter-btn:hover {
@@ -1264,6 +1281,17 @@ onBeforeUnmount(() => {
 }
 
 .esc-reason {
+  color: var(--ink-2);
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+.esc-row:has(.esc-draft) { flex-wrap: wrap; }
+.esc-row:has(.esc-draft) > .btn { order: 1; }
+.esc-issues, .esc-draft { order: 2; flex-basis: 100%; margin: 0; }
+.esc-issues { padding-left: 18px; color: var(--ink-2); display: grid; gap: 2px; }
+.esc-draft summary { cursor: pointer; color: var(--ink-3); font-size: 12.5px; }
+.esc-draft .md {
+  margin: 6px 0 0; padding: 4px 10px; border-left: 2px solid var(--line);
   color: var(--ink-2);
 }
 

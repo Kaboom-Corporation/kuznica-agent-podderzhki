@@ -189,7 +189,7 @@ code {
   color: var(--ink);
 }
 
-.view-tab[aria-pressed='true']::after {
+.view-tab::after {
   content: '';
   position: absolute;
   left: 8px;
@@ -198,7 +198,22 @@ code {
   height: 2px;
   background: var(--ink);
   border-radius: 2px 2px 0 0;
+  transform: scaleX(0);
+  opacity: 0;
+  transition: transform 220ms var(--ease), opacity 160ms var(--ease);
 }
+
+.view-tab[aria-pressed='true']::after {
+  transform: scaleX(1);
+  opacity: 1;
+}
+
+/* Появление раздела и карточки при переключении: короткий подъём с проявлением */
+@keyframes view-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+.anim-in { animation: view-in 220ms var(--ease) both; }
 
 .tab-count {
   font-family: var(--mono);
