@@ -31,11 +31,12 @@ function clientIp(event: H3Event): string {
 const hits = new Map<string, number[]>()
 let global: number[] = []
 const MAX_KEYS = 5000
-export function rateLimit(event: H3Event, perMinute = 12, globalPerMinute = Number(process.env.NUXT_CHAT_GLOBAL_PER_MIN) || 120): void {
+/** bucket — отдельный счётчик на адрес (диктовка не съедает лимит сообщений); общий потолок процесса — один. */
+export function rateLimit(event: H3Event, perMinute = 12, globalPerMinute = Number(process.env.NUXT_CHAT_GLOBAL_PER_MIN) || 120, bucket = ''): void {
   const now = Date.now()
   global = global.filter(t => now - t < 60_000)
   if (global.length >= globalPerMinute) throw createError({ statusCode: 429, statusMessage: 'Помощник сейчас перегружен, попробуйте через минуту' })
-  const ip = clientIp(event)
+  const ip = bucket + clientIp(event)
   const list = (hits.get(ip) || []).filter(t => now - t < 60_000)
   if (list.length >= perMinute) throw createError({ statusCode: 429, statusMessage: 'Слишком много сообщений, подождите минуту' })
   list.push(now)

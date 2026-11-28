@@ -136,6 +136,23 @@ function fitComposer() {
   el.style.height = `${el.scrollHeight + 2}px`
 }
 watch(text, () => nextTick(fitComposer))
+
+// Диктовка: распознанное дописываем в поле — клиент проверяет и отправляет сам
+const voiceOn = !!useRuntimeConfig().public.voiceInput
+const dictation = useDictation((t) => {
+  const cur = text.value.trimEnd()
+  text.value = (cur ? `${cur} ${t}` : t).slice(0, 4000)
+  nextTick(() => ta.value?.focus())
+})
+const voiceLabel = computed(() => ({
+  idle: 'Надиктовать',
+  recording: `Остановить запись, ${dictation.seconds.value} с`,
+  recognizing: 'Распознаю речь…',
+})[dictation.state.value])
+const recClock = computed(() => {
+  const s = dictation.seconds.value
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
+})
 // После ответа курсор возвращается в поле, кроме телефона: там не открываем клавиатуру сами
 watch(busy, (b) => {
   if (!b && ta.value && matchMedia('(hover: hover)').matches) ta.value.focus()
@@ -286,6 +303,7 @@ onBeforeUnmount(() => {
       <!-- Linear Integrated Composer -->
       <footer class="composer-area">
         <p v-if="error" class="err-line" role="alert">{{ error }}</p>
+        <p v-else-if="dictation.error.value" class="err-line" role="alert">{{ dictation.error.value }}</p>
         <div class="composer" :class="{ disabled: busy }">
           <textarea
             ref="ta"
@@ -302,9 +320,31 @@ onBeforeUnmount(() => {
               ПДн маскируются до модели<template v-if="catalogAt"> · <span :title="`Каталог обновляется из фида магазина каждые сутки, позиций: ${catalog?.items}`">цены каталога на {{ catalogAt }}</span></template>
               · <span class="mono">{{ text.length }}/4000</span>
             </span>
-            <button class="btn primary" :disabled="busy || !text.trim()" @click="send()">
-              Отправить
-            </button>
+            <div class="composer-actions">
+              <button
+                v-if="voiceOn && dictation.supported.value"
+                type="button"
+                class="btn ghost mic"
+                :class="{ rec: dictation.state.value === 'recording' }"
+                :disabled="dictation.state.value === 'recognizing'"
+                :aria-label="voiceLabel"
+                :title="voiceLabel"
+                @click="dictation.toggle()"
+              >
+                <span v-if="dictation.state.value === 'recognizing'" class="mic-spin" aria-hidden="true" />
+                <template v-else-if="dictation.state.value === 'recording'">
+                  <span class="rec-dot" aria-hidden="true" />
+                  <span class="mono">{{ recClock }}</span>
+                </template>
+                <svg v-else viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true">
+                  <rect x="9" y="3" width="6" height="11" rx="3" />
+                  <path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21" />
+                </svg>
+              </button>
+              <button class="btn primary" :disabled="busy || !text.trim() || dictation.state.value !== 'idle'" @click="send()">
+                Отправить
+              </button>
+            </div>
           </div>
         </div>
       </footer>
@@ -590,6 +630,50 @@ onBeforeUnmount(() => {
 .composer-note {
   font-size: 11.5px;
   color: var(--ink-4);
+}
+
+.composer-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.btn.mic {
+  min-width: 34px;
+  gap: 6px;
+  padding-inline: 9px;
+  color: var(--ink-3);
+}
+
+.btn.mic.rec {
+  color: var(--dot-bad);
+  border-color: color-mix(in srgb, var(--dot-bad) 40%, transparent);
+}
+
+.rec-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--dot-bad);
+  animation: rec-pulse 1.2s var(--ease) infinite;
+}
+
+@keyframes rec-pulse {
+  50% { opacity: 0.35; }
+}
+
+.mic-spin {
+  width: 14px;
+  height: 14px;
+  border: 1.6px solid var(--line-strong);
+  border-top-color: var(--indigo);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rec-dot, .mic-spin { animation: none; }
 }
 
 @media (max-width: 640px) {

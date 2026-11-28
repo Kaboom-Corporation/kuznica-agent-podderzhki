@@ -51,12 +51,16 @@ export default defineNuxtConfig({
     managerToken: '',
     // Товарный фид магазина (YML, можно .gz), обновление раз в сутки. Пусто = не обновлять.
     feedUrl: '',
+    // Распознавание речи — своя модель (OpenAI-совместимый /v1/audio/transcriptions). Пусто = диктовка выключена.
+    asrUrl: '',
     public: {
       shopName: 'Демо Софт — магазин лицензий',
       // Виджет сбора замечаний для внутренней проверки стенда. Пусто = выключен.
       // Включается в браузере ссылкой с ?feedback=1, выключается ?feedback=0.
       feedbackScript: '',
       feedbackProject: '',
+      // Кнопка диктовки в чате; включать вместе с NUXT_ASR_URL
+      voiceInput: false,
     },
   },
 })
