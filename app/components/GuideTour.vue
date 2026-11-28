@@ -13,6 +13,8 @@ const props = defineProps<{
   auto?: boolean
   /** последний шаг: куда вести дальше */
   next?: { label: string; to: string }
+  /** подготовить экран к шагу с prepare (открыть вкладку, обращение); false — шаг показать нельзя */
+  prepare?: (key: string) => Promise<boolean | void> | boolean | void
 }>()
 
 const route = useRoute()
@@ -50,7 +52,34 @@ function measure() {
   if (card.value) cardH.value = card.value.offsetHeight
 }
 
+const wait = (ms: number) => new Promise(r => setTimeout(r, ms))
+
+// Шаг с prepare: страница сама открывает нужный экран, тур ждёт элемент до ~1,5 с.
+// Не вышло — шаг убираем и идём в ту же сторону дальше, а не обрываем тур.
+async function ready(s: TourStep): Promise<boolean> {
+  if (s.prepare && props.prepare) {
+    let ok: boolean | void = true
+    try { ok = await props.prepare(s.prepare) } catch { ok = false }
+    if (ok === false) return false
+  }
+  if (!s.target) return true
+  for (let t = 0; t < 10; t++) {
+    await nextTick()
+    if (visible(s.target)) return true
+    await wait(150)
+  }
+  return false
+}
+
+let dir = 1
 async function show(n: number) {
+  const s = live.value[n]
+  if (!s) return close()
+  if ((s.prepare || s.target) && !(await ready(s))) {
+    live.value.splice(n, 1)
+    if (!live.value.length) return close()
+    return show(dir < 0 ? Math.max(0, n - 1) : Math.min(n, live.value.length - 1))
+  }
   i.value = n
   await nextTick()
   const el = visible(step.value?.target)
@@ -66,8 +95,10 @@ async function show(n: number) {
 }
 
 function start() {
-  live.value = props.steps.filter(s => !s.target || visible(s.target))
+  // шаги с prepare оставляем: их экран откроется по ходу тура
+  live.value = props.steps.filter(s => !s.target || s.prepare || visible(s.target))
   if (!live.value.length) return
+  dir = 1
   open.value = true
   show(0)
 }
@@ -82,6 +113,7 @@ function go(d: number) {
   const n = i.value + d
   if (n < 0) return
   if (n >= live.value.length) return close()
+  dir = d
   show(n)
 }
 

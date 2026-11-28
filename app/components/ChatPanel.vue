@@ -300,6 +300,11 @@ defineExpose({ restart, messages, busy })
     <p v-if="error" class="err-line" role="alert">{{ error }}</p>
     <p v-else-if="dictation.error.value" class="err-line" role="alert">{{ dictation.error.value }}</p>
     <div class="composer" :class="{ disabled: busy }">
+      <div v-if="dictation.state.value !== 'idle'" class="live" role="status" aria-live="polite">
+        <span class="live-label">{{ dictation.state.value === 'recording' ? 'Слушаю' : 'Распознаю' }}</span>
+        <span v-if="dictation.partial.value" class="live-text">{{ dictation.partial.value }}</span>
+        <span v-else class="live-hint">{{ dictation.state.value === 'recording' ? 'Говорите — текст появится здесь. Замолчите, и запись остановится сама.' : 'Ещё секунду…' }}</span>
+      </div>
       <textarea
         ref="ta"
         v-model="text"
@@ -328,8 +333,9 @@ defineExpose({ restart, messages, busy })
           >
             <span v-if="dictation.state.value === 'recognizing'" class="mic-spin" aria-hidden="true" />
             <template v-else-if="dictation.state.value === 'recording'">
-              <span class="rec-dot" aria-hidden="true" />
-              <span class="mono">{{ recClock }}</span>
+              <span class="rec-stop" :style="{ '--lvl': dictation.level.value }" aria-hidden="true" />
+              <span>Стоп</span>
+              <span class="mono rec-clock">{{ recClock }}</span>
             </template>
             <svg v-else viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true">
               <rect x="9" y="3" width="6" height="11" rx="3" />
@@ -361,11 +367,20 @@ defineExpose({ restart, messages, busy })
 
 .thread {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 28px 0 20px;
   display: flex;
   flex-direction: column;
   gap: 24px;
+  /* текст у краёв ленты гаснет, а не режется на полстроке под шапкой и над полем ввода */
+  mask-image: linear-gradient(to bottom, transparent 0, #000 22px, #000 calc(100% - 26px), transparent 100%);
+}
+
+/* реплики не сжимаются колонкой: высота всегда по содержимому */
+.thread > * {
+  flex-shrink: 0;
 }
 
 /* Welcome — Linear Command List */
@@ -629,21 +644,59 @@ defineExpose({ restart, messages, busy })
   color: var(--ink-3);
 }
 
+/* идёт запись: кнопка становится заметной красной «Стоп» */
 .btn.mic.rec {
-  color: var(--dot-bad);
-  border-color: color-mix(in srgb, var(--dot-bad) 40%, transparent);
-}
-
-.rec-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
+  color: #fff;
   background: var(--dot-bad);
-  animation: rec-pulse 1.2s var(--ease) infinite;
+  border-color: var(--dot-bad);
+  font-weight: 500;
+  padding-inline: 10px 11px;
 }
 
-@keyframes rec-pulse {
-  50% { opacity: 0.35; }
+.btn.mic.rec:hover {
+  background: color-mix(in srgb, var(--dot-bad) 88%, #000);
+}
+
+/* квадрат «стоп» с ореолом, который дышит от громкости голоса */
+.rec-stop {
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  background: #fff;
+  box-shadow: 0 0 0 calc(2px + var(--lvl, 0) * 5px) rgba(255, 255, 255, 0.28);
+  transition: box-shadow 90ms linear;
+}
+
+.rec-clock {
+  font-size: 11.5px;
+  opacity: 0.85;
+}
+
+.live {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 9px 12px 0;
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+
+.live-label {
+  flex: none;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--dot-bad);
+}
+
+.live-text {
+  color: var(--ink-2);
+  font-style: italic;
+}
+
+.live-hint {
+  color: var(--ink-4);
 }
 
 .mic-spin {
@@ -656,7 +709,8 @@ defineExpose({ restart, messages, busy })
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .rec-dot, .mic-spin { animation: none; }
+  .mic-spin { animation: none; }
+  .rec-stop { transition: none; }
 }
 
 @media (max-width: 640px) {

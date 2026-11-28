@@ -11,7 +11,10 @@ const MAX_BYTES = 5 * 1024 * 1024 // ~5 минут opus; кнопка в чат�
 export default defineEventHandler(async (event) => {
   const base = String(useRuntimeConfig().asrUrl || '').replace(/\/+$/, '')
   if (!base) throw createError({ statusCode: 503, statusMessage: 'Голосовой ввод выключен' })
-  rateLimit(event, 10, undefined, 'asr:')
+  // ?live=1 — черновик во время записи (раз в ~2,5 с, до минуты): своя корзина, чтобы не съесть лимит окончательных
+  const isLive = getQuery(event).live === '1'
+  if (isLive) rateLimit(event, 30, undefined, 'asr-live:')
+  else rateLimit(event, 10, undefined, 'asr:')
 
   // Без Content-Length (chunked) тело не ограничено — такой запрос не читаем. Браузер для FormData
   // заголовок шлёт всегда, а Node не прочитает тело длиннее заявленного.

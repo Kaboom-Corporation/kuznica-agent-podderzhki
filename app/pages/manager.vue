@@ -2,6 +2,7 @@
 import { qtyUnit, renderMd, rub } from '~/utils/md'
 import GuideTour from '~/components/GuideTour.vue'
 import { TOUR_MANAGER } from '~/utils/tour'
+import { kbCategory, KB_CATEGORIES, KB_LEARNED, KB_OTHER } from '~/utils/kb'
 
 interface Row { id: string; channel: string; status: string; subject: string | null; customer_company: string | null; updated_at: string; last_question: string | null; draft_proposals: number; open_escalations: number; cost_rub: string }
 interface Item { sku: string; name: string; unit: string; qty: number; unit_cents: string; discount_pct: number; sum_cents: string }
@@ -62,6 +63,59 @@ const waitingCount = computed(() => rows.value.filter(r => r.status === 'waiting
 const cardTotalCost = computed(() => card.value ? card.value.runs.reduce((s, r) => s + Number(r.cost_rub), 0) : 0)
 const cardVerifyIssues = computed(() => card.value ? card.value.runs.reduce((s, r) => s + (r.verify_issues?.length || 0), 0) : 0)
 const cardLastModel = computed(() => card.value?.runs.at(-1)?.model || '')
+const chatMessages = computed(() => card.value ? card.value.messages.filter(x => ['user', 'assistant', 'manager'].includes(x.role)) : [])
+
+// Шапка обращения, которая остаётся на месте при прокрутке: кто, о чём, что уже готово. Собирается кодом из данных обращения.
+const cardContext = computed(() => {
+  const c = card.value
+  if (!c) return null
+  const conv = c.conversation
+  const who = [conv.customer_name, conv.customer_company, conv.customer_email].filter(Boolean).join(' · ') || 'Клиент не представился'
+  const userMsgs = c.messages.filter(m => m.role === 'user')
+  const lastAsk = userMsgs.at(-1)?.content.replace(/\s+/g, ' ').trim() || ''
+  const draft = c.proposals.find(p => p.status === 'draft')
+  const facts = [
+    `${chatMessages.value.length} ${plural(chatMessages.value.length, 'сообщение', 'сообщения', 'сообщений')}`,
+    draft ? `черновик ${draft.number.startsWith('КП') ? draft.number : `КП ${draft.number}`} на ${rub(draft.total_cents)}` : '',
+    c.escalations.some(e => !e.resolved) ? 'ждёт ответа менеджера' : '',
+  ].filter(Boolean)
+  return { who, lastAsk: lastAsk.length > 140 ? lastAsk.slice(0, 139) + '…' : lastAsk, facts, asks: userMsgs.length }
+})
+
+function plural(n: number, one: string, few: string, many: string) {
+  const n10 = n % 10, n100 = n % 100
+  return n10 === 1 && n100 !== 11 ? one : n10 >= 2 && n10 <= 4 && (n100 < 12 || n100 > 14) ? few : many
+}
+
+function toComposer() {
+  const ta = document.querySelector<HTMLTextAreaElement>('.comment-ta')
+  ta?.focus({ preventScroll: true })
+  document.querySelector('.inbox > .workspace')?.scrollTo({ top: 1e6, behavior: 'smooth' })
+}
+
+// Правка черновика КП: количество, скидка, убрать позицию. Итог на экране — предварительный, суммы считает сервер.
+interface EditLine { sku: string; name: string; unit: string; unit_cents: string; qty: number; discount_pct: number }
+const pe = ref<{ id: string; items: EditLine[]; notes: string } | null>(null)
+const MAX_PCT = 40
+function startEdit(p: Proposal) {
+  pe.value = { id: p.id, notes: p.notes || '', items: p.items.map(i => ({ sku: i.sku, name: i.name, unit: i.unit, unit_cents: i.unit_cents, qty: i.qty, discount_pct: i.discount_pct })) }
+}
+function lineSum(l: EditLine) {
+  const gross = BigInt(l.unit_cents) * BigInt(Math.max(0, Math.floor(l.qty) || 0))
+  const pct = BigInt(Math.min(MAX_PCT, Math.max(0, Math.floor(l.discount_pct) || 0)))
+  return gross - (gross * pct + 50n) / 100n
+}
+const peTotal = computed(() => pe.value ? pe.value.items.reduce((s, l) => s + lineSum(l), 0n).toString() : '0')
+const peValid = computed(() => !!pe.value?.items.length && pe.value.items.every(l => Number.isInteger(l.qty) && l.qty >= 1 && l.qty <= 100_000 && Number.isInteger(l.discount_pct) && l.discount_pct >= 0 && l.discount_pct <= MAX_PCT))
+const saveEdit = () => act(async () => {
+  const e = pe.value!
+  const r = await api<{ number: string; total_cents: string }>(`/api/manager/proposals/${e.id}`, {
+    method: 'PUT',
+    body: { items: e.items.map(l => ({ sku: l.sku, qty: l.qty, discount_pct: l.discount_pct })), notes: e.notes },
+  })
+  pe.value = null
+  return `${r.number.startsWith('КП') ? r.number : `КП ${r.number}`} пересчитано: ${rub(r.total_cents)}. Клиенту ничего не ушло`
+})
 
 async function api<T>(url: string, opts: any = {}): Promise<T> {
   try {
@@ -214,7 +268,7 @@ function onDialogBackdropClick(e: MouseEvent) {
 }
 
 // База знаний: список статей и правка в окне. Сохранение режет текст на куски и пересчитывает поиск.
-interface KbItem { id: number; slug: string; title: string; kind: 'store' | 'panel' | 'learned'; chunks: number; updated_at: string }
+interface KbItem { id: number; slug: string; title: string; kind: 'store' | 'panel' | 'learned'; chunks: number; updated_at: string; preview: string | null; headings: string[] | null }
 const KB_KIND: Record<KbItem['kind'], string> = { store: 'база магазина', panel: 'правка менеджера', learned: 'из ответа менеджера' }
 const kb = ref<KbItem[]>([])
 const kbQuery = ref('')
@@ -222,10 +276,76 @@ const kbDialog = ref<HTMLDialogElement | null>(null)
 const kbEdit = ref<{ id: number | null; title: string; content: string; kind: KbItem['kind'] | null }>({ id: null, title: '', content: '', kind: null })
 const kbBusy = ref(false)
 const kbNotice = ref('')
+const kbCat = ref('')
 const kbFiltered = computed(() => {
   const s = kbQuery.value.trim().toLowerCase()
-  return s ? kb.value.filter(d => d.title.toLowerCase().includes(s)) : kb.value
+  return s
+    ? kb.value.filter(d => d.title.toLowerCase().includes(s) || (d.headings || []).some(h => h.toLowerCase().includes(s)) || (d.preview || '').toLowerCase().includes(s))
+    : kb.value
 })
+// Полки каталога: порядок — как в KB_CATEGORIES, «Прочее» и ответы менеджера — в конце
+const KB_ORDER = [...KB_CATEGORIES.map(c => c.key), KB_OTHER.key, KB_LEARNED.key]
+const kbCats = computed(() => KB_ORDER
+  .map(key => ({ key, label: [...KB_CATEGORIES, KB_OTHER, KB_LEARNED].find(c => c.key === key)!.label, n: kb.value.filter(d => kbCategory(d).key === key).length }))
+  .filter(c => c.n))
+const kbGroups = computed(() => KB_ORDER
+  .filter(key => !kbCat.value || kbCat.value === key)
+  .map(key => ({ key, label: kbCats.value.find(c => c.key === key)?.label || '', items: kbFiltered.value.filter(d => kbCategory(d).key === key) }))
+  .filter(g => g.items.length))
+const uniq = (a: string[]) => [...new Set(a)]
+// Превью без разметки и обрывков навигации сайта, с которого собрана статья («Интернет-магазин», «Написать в Max»)
+const cleanPreview = (s: string) => s.replace(/[#*`]/g, '').replace(/^\s*[-•]\s+/gm, '')
+  .replace(/Интернет-магазин|Написать в (?:Max|Telegram|WhatsApp|Viber)/gi, ' ')
+  .replace(/\s+/g, ' ').trim()
+
+// Редактор статьи: текст, просмотр или рядом; список разделов прыгает к заголовку в тексте
+const KB_MODES = [{ key: 'text', label: 'Текст' }, { key: 'split', label: 'Рядом' }, { key: 'view', label: 'Просмотр' }] as const
+const kbMode = ref<'text' | 'split' | 'view'>('split')
+const kbTa = ref<HTMLTextAreaElement | null>(null)
+const kbPreview = computed(() => renderMd(kbEdit.value.content, { headings: true }))
+const kbSections = computed(() => {
+  const out: { title: string; at: number }[] = []
+  let pos = 0
+  for (const line of kbEdit.value.content.split('\n')) {
+    const m = /^\s*#{1,4}\s+(.+)$/.exec(line)
+    if (m) out.push({ title: m[1]!.trim(), at: pos })
+    pos += line.length + 1
+  }
+  return out
+})
+function jumpTo(at: number) {
+  if (kbMode.value === 'view') kbMode.value = 'split'
+  nextTick(() => {
+    const ta = kbTa.value
+    if (!ta) return
+    ta.focus({ preventScroll: true })
+    ta.setSelectionRange(at, at)
+    const lh = parseFloat(getComputedStyle(ta).lineHeight) || 20
+    ta.scrollTop = Math.max(0, kbEdit.value.content.slice(0, at).split('\n').length - 2) * lh
+  })
+}
+function mdInsert(before: string, placeholder: string, lineStart: boolean, after = '') {
+  if (kbMode.value === 'view') kbMode.value = 'split'
+  nextTick(() => {
+    const ta = kbTa.value
+    if (!ta) return
+    const v = kbEdit.value.content
+    let s = ta.selectionStart, e = ta.selectionEnd
+    const sel = v.slice(s, e) || placeholder
+    let pre = before
+    if (lineStart && s > 0 && v[s - 1] !== '\n') pre = (before === '## ' ? '\n\n' : '\n') + before
+    kbEdit.value.content = v.slice(0, s) + pre + sel + after + v.slice(e)
+    s += pre.length
+    nextTick(() => { ta.focus(); ta.setSelectionRange(s, s + sel.length) })
+  })
+}
+
+async function editLearned(slug: string) {
+  if (!kb.value.length) await loadKb()
+  const d = kb.value.find(x => x.slug === slug)
+  if (d) await editKb(d.id)
+  else kbNotice.value = 'Статья не нашлась — обновите страницу'
+}
 
 async function loadKb() {
   kb.value = await api<KbItem[]>('/api/manager/kb')
@@ -298,6 +418,30 @@ const closedShare = computed(() => {
 watch(filter, refresh)
 watch(tab, refresh)
 watch(days, refresh)
+
+// Тур сам открывает нужный экран: очередь с обращением, где есть КП или эскалация, или сводку с базой знаний.
+// Раньше шаги, чьих элементов не было на экране, выпадали — менеджер видел тур урывками.
+async function tourPrepare(key: string): Promise<boolean> {
+  if (!token.value) return false
+  try {
+    if (key === 'queue') {
+      if (tab.value !== 'queue') tab.value = 'queue'
+      if (card.value && (card.value.proposals.length || card.value.escalations.some(e => !e.resolved))) return true
+      if (!rows.value.length || filter.value) { filter.value = ''; await loadRows() }
+      const pick = rows.value.find(r => r.draft_proposals && r.open_escalations) || rows.value.find(r => r.draft_proposals) || rows.value.find(r => r.open_escalations) || rows.value[0]
+      if (!pick) return false
+      if (selected.value !== pick.id || !card.value) await open(pick.id)
+      return true
+    }
+    if (key === 'stats') {
+      if (tab.value !== 'stats') tab.value = 'stats'
+      if (!stats.value) await loadStats()
+      if (!kb.value.length) { await loadKb(); kbLoaded = true }
+      return true
+    }
+  } catch { return false }
+  return true
+}
 
 let timer: ReturnType<typeof setInterval> | null = null
 onMounted(() => {
@@ -419,9 +563,21 @@ onBeforeUnmount(() => {
         </div>
 
         <div class="ws-content">
-          <h1 class="ws-title">
-            {{ card.conversation.subject || card.messages.find(m => m.role === 'user')?.content?.slice(0, 88) || 'Обращение' }}
-          </h1>
+          <header class="ws-head">
+            <div class="ws-head-row">
+              <h1 class="ws-title">
+                {{ card.conversation.subject || card.messages.find(m => m.role === 'user')?.content?.slice(0, 88) || 'Обращение' }}
+              </h1>
+              <button type="button" class="btn sm ws-to-reply" @click="toComposer">К ответу</button>
+            </div>
+            <p v-if="cardContext" class="ws-ctx">
+              <span class="ws-ctx-who">{{ cardContext.who }}</span>
+              <span v-for="f in cardContext.facts" :key="f" class="ws-ctx-fact">{{ f }}</span>
+            </p>
+            <p v-if="cardContext?.lastAsk" class="ws-ctx-ask" :title="cardContext.lastAsk">
+              <span class="muted">Последний вопрос:</span> {{ cardContext.lastAsk }}
+            </p>
+          </header>
 
           <p v-if="notice" class="ws-notice" role="status">{{ notice }}</p>
 
@@ -454,7 +610,46 @@ onBeforeUnmount(() => {
               </div>
             </div>
 
-            <div class="table-wrap">
+            <div v-if="pe?.id === p.id" class="pe">
+              <div class="table-wrap">
+                <table class="tbl pe-tbl">
+                  <thead>
+                    <tr>
+                      <th>Позиция</th>
+                      <th class="r">Кол-во</th>
+                      <th class="r">Скидка, %</th>
+                      <th class="r">Сумма</th>
+                      <th aria-label="Убрать" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="(l, li) in pe.items" :key="l.sku">
+                      <td>
+                        <div class="tbl-name">{{ l.name }}</div>
+                        <div class="mono muted" style="font-size:11.5px">{{ l.sku }} · {{ rub(l.unit_cents) }} за {{ l.unit }}</div>
+                      </td>
+                      <td class="r"><input v-model.number="l.qty" class="field pe-num" type="number" min="1" max="100000" step="1" :aria-label="`Количество: ${l.name}`"></td>
+                      <td class="r"><input v-model.number="l.discount_pct" class="field pe-num" type="number" min="0" :max="MAX_PCT" step="1" :aria-label="`Скидка: ${l.name}`"></td>
+                      <td class="r num tbl-strong">{{ rub(lineSum(l).toString()) }}</td>
+                      <td class="r">
+                        <button type="button" class="btn ghost sm" :disabled="pe.items.length < 2" :title="pe.items.length < 2 ? 'В КП должна остаться хотя бы одна позиция' : 'Убрать позицию'" @click="pe.items.splice(li, 1)">Убрать</button>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <label class="pe-note">Примечание в КП
+                <input v-model="pe.notes" class="field" type="text" maxlength="2000" placeholder="Например: скидка согласована с руководителем">
+              </label>
+              <div class="pe-foot">
+                <span class="muted" style="font-size:12px">Скидка от 0 до {{ MAX_PCT }}%. Цены — из каталога, итог пересчитает сервер.</span>
+                <span class="num doc-total" style="margin-left:auto">{{ rub(peTotal) }}</span>
+                <button type="button" class="btn ghost sm" :disabled="busy" @click="pe = null">Отмена</button>
+                <button type="button" class="btn dark sm" :disabled="busy || !peValid" @click="saveEdit">Сохранить</button>
+              </div>
+            </div>
+
+            <div v-else class="table-wrap">
               <table class="tbl">
                 <thead>
                   <tr>
@@ -486,10 +681,11 @@ onBeforeUnmount(() => {
               </table>
             </div>
 
-            <p v-if="p.notes" class="doc-note">{{ p.notes }}</p>
+            <p v-if="p.notes && pe?.id !== p.id" class="doc-note">{{ p.notes }}</p>
 
-            <div class="doc-foot">
+            <div v-if="pe?.id !== p.id" class="doc-foot">
               <button class="btn sm" @click="showPdf(p)">Открыть PDF</button>
+              <button v-if="p.status === 'draft'" class="btn sm" :disabled="busy" @click="startEdit(p)">Изменить состав</button>
               <template v-if="p.status === 'draft'">
                 <input v-model="email" class="field doc-input" type="email" placeholder="Email клиента" aria-label="Почта клиента" />
                 <input v-model="proposalNote" class="field doc-input-note" type="text" placeholder="Комментарий к письму" aria-label="Комментарий" />
@@ -506,7 +702,7 @@ onBeforeUnmount(() => {
             <h2 class="sec-h">Переписка</h2>
             <div class="msg-list">
               <div
-                v-for="m in card.messages.filter(x => ['user', 'assistant', 'manager'].includes(x.role))"
+                v-for="m in chatMessages"
                 :key="m.id"
                 class="msg-item"
                 :class="m.role"
@@ -667,7 +863,7 @@ onBeforeUnmount(() => {
         </section>
       </div>
 
-      <section class="stats-sec">
+      <section class="stats-sec learned-sec">
         <h2 class="sec-h">Агент научился на ответах менеджера</h2>
         <p v-if="!stats.learned?.length" class="muted" style="font-size:13px">
           Пока нет. Отметьте «Запомнить ответ в базе знаний» при ответе клиенту.
@@ -680,34 +876,54 @@ onBeforeUnmount(() => {
             </div>
             <div class="line-right">
               <span class="num muted" style="font-size:12px">{{ time(l.updated_at) }}</span>
+              <button class="btn ghost sm" @click="editLearned(l.slug)">Изменить</button>
               <button class="btn ghost sm" :disabled="forgetting === l.slug" @click="forget(l.slug)">Забыть</button>
             </div>
           </li>
         </ul>
       </section>
 
-      <section class="stats-sec">
+      <section class="stats-sec kb-sec">
         <div class="kb-head">
           <h2 class="sec-h">База знаний · {{ kb.length }}</h2>
           <div class="kb-tools">
-            <input v-model="kbQuery" class="field kb-search" type="search" placeholder="Найти статью" aria-label="Найти статью">
-            <button class="btn sm" @click="editKb(null)">Новая статья</button>
+            <input v-model="kbQuery" class="field kb-search" type="search" placeholder="Найти статью или раздел" aria-label="Найти статью">
+            <button class="btn" @click="editKb(null)">Новая статья</button>
           </div>
         </div>
+        <div class="kb-cats" role="group" aria-label="Разделы базы знаний">
+          <button class="kb-cat" :aria-pressed="kbCat === ''" @click="kbCat = ''">Все <span class="num">{{ kb.length }}</span></button>
+          <button v-for="c in kbCats" :key="c.key" class="kb-cat" :aria-pressed="kbCat === c.key" @click="kbCat = kbCat === c.key ? '' : c.key">
+            {{ c.label }} <span class="num">{{ c.n }}</span>
+          </button>
+        </div>
         <p v-if="kbNotice" class="kb-notice" role="status">{{ kbNotice }}</p>
-        <ul class="line-list kb-list">
-          <li v-for="d in kbFiltered" :key="d.id" class="line-row">
-            <div class="line-left">
-              <span class="status-dot" :class="{ ok: d.kind !== 'store' }" aria-hidden="true" />
-              <span>{{ d.title }}</span>
+        <div class="kb-shelves">
+          <section v-for="g in kbGroups" :key="g.key" class="kb-shelf">
+            <h3 class="kb-shelf-h">{{ g.label }} <span class="muted num">{{ g.items.length }}</span></h3>
+            <div class="kb-grid">
+              <article v-for="d in g.items" :key="d.id" class="kb-card">
+                <button type="button" class="kb-card-main" @click="editKb(d.id)">
+                  <span class="kb-card-title">{{ d.title.replace(/^Ответ менеджера: /, '') }}</span>
+                  <span v-if="d.preview" class="kb-card-preview">{{ cleanPreview(d.preview) }}</span>
+                </button>
+                <ul v-if="d.headings?.length" class="kb-card-secs" aria-label="Разделы статьи">
+                  <li v-for="h in uniq(d.headings).slice(0, 4)" :key="h">{{ h }}</li>
+                  <li v-if="uniq(d.headings).length > 4" class="muted">ещё {{ uniq(d.headings).length - 4 }}</li>
+                </ul>
+                <div class="kb-card-foot">
+                  <span class="status">
+                    <span class="status-dot" :class="{ ok: d.kind !== 'store' }" aria-hidden="true" />
+                    <span>{{ KB_KIND[d.kind] }}</span>
+                  </span>
+                  <span class="muted num">{{ d.chunks }} фр.</span>
+                  <button class="btn ghost sm" style="margin-left:auto" @click="editKb(d.id)">Изменить</button>
+                </div>
+              </article>
             </div>
-            <div class="line-right">
-              <span class="muted" style="font-size:12px">{{ KB_KIND[d.kind] }} · {{ d.chunks }} фр.</span>
-              <button class="btn ghost sm" @click="editKb(d.id)">Изменить</button>
-            </div>
-          </li>
-          <li v-if="!kbFiltered.length" class="muted" style="font-size:13px;padding:8px 0">Ничего не нашлось</li>
-        </ul>
+          </section>
+          <p v-if="!kbGroups.length" class="muted" style="font-size:13px;padding:8px 0">Ничего не нашлось</p>
+        </div>
       </section>
 
       <section class="stats-sec">
@@ -744,9 +960,26 @@ onBeforeUnmount(() => {
           <label class="kb-label">Заголовок
             <input v-model="kbEdit.title" class="field" maxlength="200" required>
           </label>
-          <label class="kb-label kb-grow">Текст · разделы с «## », агент находит ответ по разделу
-            <textarea v-model="kbEdit.content" class="field kb-ta" maxlength="40000" required spellcheck="true" />
-          </label>
+          <div class="kb-label kb-grow">
+            <div class="kb-ed-bar">
+              <span>Текст · агент находит ответ по разделу «## »</span>
+              <div class="kb-ed-tools">
+                <button type="button" class="btn ghost sm" title="Новый раздел: строка «## »" @click="mdInsert('## ', 'Название раздела', true)">Раздел</button>
+                <button type="button" class="btn ghost sm" title="Жирный: **текст**" @click="mdInsert('**', 'текст', false, '**')">Жирный</button>
+                <button type="button" class="btn ghost sm" title="Пункт списка: «- »" @click="mdInsert('- ', 'пункт', true)">Список</button>
+                <div class="filter-links kb-ed-mode" role="group" aria-label="Вид редактора">
+                  <button v-for="m in KB_MODES" :key="m.key" type="button" class="filter-btn" :aria-pressed="kbMode === m.key" @click="kbMode = m.key">{{ m.label }}</button>
+                </div>
+              </div>
+            </div>
+            <div v-if="kbSections.length" class="kb-toc" aria-label="Разделы статьи">
+              <button v-for="s in kbSections" :key="s.at" type="button" class="kb-toc-item" @click="jumpTo(s.at)">{{ s.title }}</button>
+            </div>
+            <div class="kb-ed" :class="`mode-${kbMode}`">
+              <textarea v-show="kbMode !== 'view'" ref="kbTa" v-model="kbEdit.content" class="field kb-ta" maxlength="40000" required spellcheck="true" aria-label="Текст статьи, Markdown" />
+              <div v-if="kbMode !== 'text'" class="kb-preview md" aria-label="Просмотр статьи" v-html="kbPreview" />
+            </div>
+          </div>
           <p v-if="kbEdit.kind === 'store'" class="muted" style="font-size:12px;margin:0">
             Статья из базы магазина. После правки перезагрузка базы её не затрёт.
           </p>
@@ -759,7 +992,7 @@ onBeforeUnmount(() => {
         </div>
       </form>
     </dialog>
-    <GuideTour ref="tour" id="manager" :steps="TOUR_MANAGER" />
+    <GuideTour ref="tour" id="manager" :steps="TOUR_MANAGER" :prepare="tourPrepare" />
   </div>
 </template>
 
@@ -1428,14 +1661,71 @@ onBeforeUnmount(() => {
 }
 
 /* База знаний */
-.kb-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
+.kb-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
 .kb-head .sec-h { margin: 0; }
 .kb-tools { display: flex; gap: 8px; align-items: center; }
-.kb-search { width: 220px; }
-.kb-list { max-height: 420px; overflow-y: auto; }
-.kb-list .line-left span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* поле поиска — ровно по высоте кнопки рядом: 30px, тот же радиус и кегль */
+.kb-search { width: 240px; height: 30px; padding: 0 10px; font-size: 13px; line-height: 28px; }
 .kb-notice { font-size: 13px; margin: 6px 0; color: var(--ink-2); }
-.kb-dialog { width: min(760px, 95vw); }
+.kb-cats { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
+.kb-cat {
+  display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px;
+  border: 1px solid var(--line); border-radius: 999px; background: var(--bg); color: var(--ink-2);
+  font-size: 12.5px; cursor: pointer; transition: background 120ms var(--ease), border-color 120ms var(--ease);
+}
+.kb-cat .num { color: var(--ink-4); font-size: 11.5px; }
+.kb-cat:hover { background: var(--bg-hover); }
+.kb-cat[aria-pressed="true"] { background: var(--ink); border-color: var(--ink); color: #fff; }
+.kb-cat[aria-pressed="true"] .num { color: rgba(255, 255, 255, 0.65); }
+.kb-cat:focus-visible { outline: 2px solid var(--indigo); outline-offset: 1px; }
+.kb-shelves { display: flex; flex-direction: column; gap: 18px; }
+.kb-shelf-h { margin: 0 0 8px; font-size: 12px; font-weight: 600; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.04em; }
+.kb-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
+.kb-card {
+  display: flex; flex-direction: column; gap: 8px; min-width: 0; padding: 12px 12px 8px;
+  border: 1px solid var(--line); border-radius: 8px; background: var(--bg);
+  transition: border-color 120ms var(--ease), box-shadow 120ms var(--ease);
+}
+.kb-card:hover { border-color: var(--line-strong); box-shadow: var(--shadow-card); }
+.kb-card-main { all: unset; display: flex; flex-direction: column; gap: 4px; cursor: pointer; min-width: 0; }
+.kb-card-main:focus-visible { outline: 2px solid var(--indigo); outline-offset: 2px; border-radius: 4px; }
+.kb-card-title { font-size: 13.5px; font-weight: 600; color: var(--ink); line-height: 1.35; }
+.kb-card-preview { font-size: 12.5px; color: var(--ink-3); line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.kb-card-secs { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px; }
+.kb-card-secs li { font-size: 11.5px; padding: 1px 7px; border-radius: 4px; background: var(--bg-chrome); color: var(--ink-2); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kb-card-foot { display: flex; align-items: center; gap: 10px; margin-top: auto; padding-top: 6px; border-top: 1px solid var(--line-soft); font-size: 12px; }
+.kb-dialog { width: min(1100px, 96vw); }
+.kb-ed-bar { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+.kb-ed-tools { display: flex; align-items: center; gap: 2px; flex-wrap: wrap; }
+.kb-ed-mode { margin-left: 8px; }
+/* длинная статья — до трёх строк разделов, дальше листаются: место отдано тексту */
+.kb-toc { display: flex; flex-wrap: wrap; gap: 4px; max-height: 78px; overflow-y: auto; flex: none; }
+.kb-toc-item { all: unset; cursor: pointer; font-size: 11.5px; padding: 2px 8px; border-radius: 4px; border: 1px solid var(--line); color: var(--ink-2); }
+.kb-toc-item:hover { background: var(--bg-hover); color: var(--ink); }
+.kb-toc-item:focus-visible { outline: 2px solid var(--indigo); }
+.kb-ed { flex: 1; min-height: 0; display: grid; gap: 10px; }
+.kb-ed.mode-split { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.kb-preview { min-height: 200px; overflow-y: auto; padding: 10px 14px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg-chrome); color: var(--ink); font-size: 13.5px; }
+.kb-preview :deep(h2) { font-size: 15px; margin: 14px 0 6px; padding-bottom: 4px; border-bottom: 1px solid var(--line-soft); }
+.kb-preview :deep(h3) { font-size: 14px; margin: 12px 0 4px; }
+.kb-preview :deep(h4) { font-size: 13.5px; margin: 10px 0 4px; }
+.kb-preview :deep(h2:first-child), .kb-preview :deep(h3:first-child) { margin-top: 0; }
+
+/* Шапка обращения и поле ответа */
+.ws-head { display: flex; flex-direction: column; gap: 6px; }
+.ws-head-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.ws-to-reply { flex: none; }
+.ws-ctx { margin: 0; display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12.5px; color: var(--ink-2); }
+.ws-ctx-who { font-weight: 500; color: var(--ink); }
+.ws-ctx-fact { color: var(--ink-3); }
+.ws-ctx-fact::before { content: '·'; margin-right: 14px; color: var(--ink-4); }
+.ws-ctx-ask { margin: 0; font-size: 12.5px; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Правка КП */
+.pe { display: flex; flex-direction: column; gap: 10px; }
+.pe-num { width: 84px; height: 28px; padding: 0 8px; text-align: right; font-variant-numeric: tabular-nums; }
+.pe-note { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--ink-3); padding: 0 14px; }
+.pe-foot { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 0 14px 12px; }
 .kb-form { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 .kb-body { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 12px; padding: 14px; }
 .kb-label { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--ink-3); }
@@ -1451,7 +1741,17 @@ onBeforeUnmount(() => {
   .inbox { flex: 1 1 auto; min-height: 0; height: calc(100dvh - 48px); overflow: hidden; }
   .inbox-list, .inbox > .workspace, .inbox > .ws-empty { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
   .inbox-bar { position: sticky; top: 0; z-index: 2; flex-shrink: 0; background: var(--bg-chrome); }
-  .ws-bar { position: sticky; top: 0; z-index: 2; flex-shrink: 0; background: var(--bg); }
+  .ws-bar { position: sticky; top: 0; z-index: 3; flex-shrink: 0; background: var(--bg); }
+  /* шапка обращения прилипает под полосой статуса, поле ответа — к низу: отвечать без прокрутки до конца */
+  .ws-head {
+    position: sticky; top: 44px; z-index: 2; background: var(--bg);
+    margin: -24px -28px 0; padding: 16px 28px 12px; border-bottom: 1px solid var(--line-soft);
+  }
+  .comment-box { position: sticky; bottom: 12px; z-index: 2; box-shadow: 0 -10px 24px -8px rgba(17, 18, 20, 0.14), var(--shadow-card); }
+  .ws-to-reply { display: none; }
+}
+@media (max-width: 760px) {
+  .kb-ed.mode-split { grid-template-columns: minmax(0, 1fr); }
 }
 
 @media (max-width: 960px) {
@@ -1474,7 +1774,7 @@ onBeforeUnmount(() => {
   .topbar-right .btn { padding-left: 6px; padding-right: 6px; }
   .kb-tools { width: 100%; }
   .kb-search { flex: 1; width: auto; min-width: 0; }
-  .kb-list .line-right .muted { display: none; }
+  .kb-grid { grid-template-columns: minmax(0, 1fr); }
   .kb-dialog { width: 100vw; max-width: 100vw; height: 100dvh; max-height: 100dvh; border-radius: 0; margin: 0; }
 }
 </style>

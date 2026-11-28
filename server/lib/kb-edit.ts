@@ -9,7 +9,7 @@ import { embedTexts } from '../ported/rag/embeddings'
  * Статьи, созданные или исправленные в панели, помечаются source = 'panel:…' —
  * перезаливка базы магазина их не затирает (см. ingest.ts).
  */
-export interface KbListItem { id: number; slug: string; title: string; kind: 'store' | 'panel' | 'learned'; chunks: number; updated_at: string }
+export interface KbListItem { id: number; slug: string; title: string; kind: 'store' | 'panel' | 'learned'; chunks: number; updated_at: string; preview: string | null; headings: string[] | null }
 export interface KbDoc { id: number; slug: string; title: string; kind: KbListItem['kind']; content: string; updated_at: string }
 
 export const KB_TITLE_MAX = 200
@@ -19,7 +19,9 @@ const KIND_SQL = `case when source like 'manager:%' then 'learned' when source l
 
 export async function listKb(): Promise<KbListItem[]> {
   return q<KbListItem>(
-    `select d.id, d.slug, d.title, ${KIND_SQL} as kind, count(c.id)::int as chunks, d.updated_at
+    `select d.id, d.slug, d.title, ${KIND_SQL} as kind, count(c.id)::int as chunks, d.updated_at,
+            (select left(content, 180) from kb_chunks where document_id = d.id order by idx limit 1) as preview,
+            (select array_agg(heading order by idx) from kb_chunks where document_id = d.id and heading is not null) as headings
        from kb_documents d left join kb_chunks c on c.document_id = d.id
       group by d.id order by d.title`,
   )

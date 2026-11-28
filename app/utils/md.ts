@@ -27,7 +27,8 @@ function inline(s: string): string {
     .replace(PH_RE, (_m, i: string) => links[Number(i)] ?? '')
 }
 
-export function renderMd(src: string): string {
+/** headings: «## » → настоящий заголовок (просмотр статьи БЗ); в чате заголовки — жирной строкой. */
+export function renderMd(src: string, opts: { headings?: boolean } = {}): string {
   const lines = escapeHtml(src.replace(/\r\n?/g, '\n').replace(/\u0000/g, '')).split('\n')
   const out: string[] = []
   let list: 'ul' | 'ol' | null = null
@@ -38,7 +39,7 @@ export function renderMd(src: string): string {
     const line = raw.trimEnd()
     const ul = /^\s*[-*•]\s+(.*)$/.exec(line)
     const ol = /^\s*\d+[.)]\s+(.*)$/.exec(line)
-    const h = /^\s*#{1,4}\s+(.*)$/.exec(line)
+    const h = /^\s*(#{1,4})\s+(.*)$/.exec(line)
     if (ul || ol) {
       flushPara()
       const want = ul ? 'ul' : 'ol'
@@ -46,7 +47,11 @@ export function renderMd(src: string): string {
       out.push(`<li>${inline((ul ?? ol)![1]!)}</li>`)
     } else if (h) {
       flushPara(); closeList()
-      out.push(`<p><strong>${inline(h[1]!)}</strong></p>`)
+      if (opts.headings) {
+        const n = Math.min(4, h[1]!.length + 1)
+        out.push(`<h${n}>${inline(h[2]!)}</h${n}>`)
+      }
+      else out.push(`<p><strong>${inline(h[2]!)}</strong></p>`)
     } else if (!line.trim()) {
       flushPara(); closeList()
     } else {
